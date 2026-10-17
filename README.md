@@ -57,9 +57,7 @@ powershell -ExecutionPolicy Bypass `
   -File .\scripts\windows-build.ps1
 ```
 
-The same build runs through `.github/workflows/windows-build.yml` on pushes,
-pull requests, or manual dispatch. The workflow runs the VST3 validator and both
-audio probes, then uploads the `.vst3` bundle as a downloadable Actions artifact.
+The GitHub Actions workflow is not yet included in this repository. Once it is added under `.github/workflows`, it can build and upload the `.vst3` bundle.
 
 ## Licensing note
 
