@@ -7,7 +7,8 @@ $rustInfo = rustc -vV
 if ($LASTEXITCODE -ne 0) {
     throw "Rust is unavailable. Install the x64 MSVC Rust toolchain."
 }
-if ($rustInfo -notmatch "host: x86_64-pc-windows-msvc") {
+$rustInfoText = $rustInfo -join "`n"
+if ($rustInfoText -notmatch "(?m)^host: x86_64-pc-windows-msvc$") {
     throw "Use the x64 MSVC Rust toolchain to match 64-bit Windows DAWs."
 }
 
