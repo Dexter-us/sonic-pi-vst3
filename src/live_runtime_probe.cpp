@@ -7,8 +7,12 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -17,6 +21,8 @@ namespace {
 
 constexpr double kSampleRate = 48000.0;
 constexpr std::uint32_t kCallbackFrames = 512;
+constexpr auto kCallbackPeriod = std::chrono::duration<double>(
+    static_cast<double>(kCallbackFrames) / kSampleRate);
 
 struct StereoBuffers {
     std::array<float, kCallbackFrames> left{};
@@ -30,6 +36,44 @@ void render(ClockworkEmbed* engine, StereoBuffers& buffers) {
     if (rendered != kCallbackFrames) {
         throw std::runtime_error("SuperSonic returned a short host audio block");
     }
+}
+
+std::filesystem::path runtimeLogPath() {
+#if defined(_WIN32)
+    const char* base = std::getenv("LOCALAPPDATA");
+    if (base && *base) {
+        return std::filesystem::path(base) / "sonic-pi-vst" /
+               "spider-runtime.log";
+    }
+#else
+    const char* base = std::getenv("HOME");
+    if (base && *base) {
+        return std::filesystem::path(base) / ".sonic-pi-vst" /
+               "spider-runtime.log";
+    }
+#endif
+    return {};
+}
+
+void printRuntimeLogTail() {
+    const auto path = runtimeLogPath();
+    if (path.empty()) return;
+
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        std::cerr << "Could not read Sonic Pi runtime log: "
+                  << path.string() << '\n';
+        return;
+    }
+
+    std::string contents((std::istreambuf_iterator<char>(input)),
+                         std::istreambuf_iterator<char>());
+    constexpr std::size_t kMaxLogBytes = 16000;
+    if (contents.size() > kMaxLogBytes) {
+        contents.erase(0, contents.size() - kMaxLogBytes);
+    }
+    std::cerr << "--- Sonic Pi runtime log: " << path.string() << " ---\n"
+              << contents << "\n--- end runtime log ---\n";
 }
 
 } // namespace
@@ -68,7 +112,7 @@ int main() {
                !runtime.failed() &&
                std::chrono::steady_clock::now() < startupDeadline) {
             render(engine, buffers);
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            std::this_thread::sleep_for(kCallbackPeriod);
         }
         if (!runtime.ready()) {
             throw std::runtime_error(runtime.error().empty()
@@ -95,7 +139,7 @@ int main() {
                     ++samples;
                 }
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            std::this_thread::sleep_for(kCallbackPeriod);
         }
 
         const double rms = std::sqrt(energy / static_cast<double>(samples));
@@ -115,6 +159,7 @@ int main() {
         runtime.stop();
         clockwork_embed_close(engine);
         std::cerr << "Live runtime probe failed: " << error.what() << '\n';
+        printRuntimeLogTail();
         return 1;
     }
 }
