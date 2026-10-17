@@ -17,6 +17,14 @@
 #include <string>
 #include <thread>
 
+#if defined(_WIN32)
+#define NOMINMAX
+#include <windows.h>
+#ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
+#define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002
+#endif
+#endif
+
 namespace {
 
 constexpr double kSampleRate = 48000.0;
@@ -28,6 +36,56 @@ struct StereoBuffers {
     std::array<float, kCallbackFrames> left{};
     std::array<float, kCallbackFrames> right{};
     std::array<float*, 2> outputs{{left.data(), right.data()}};
+};
+
+class AudioBlockPacer {
+public:
+    AudioBlockPacer()
+        : nextBlock_(std::chrono::steady_clock::now()) {
+#if defined(_WIN32)
+        timer_ = CreateWaitableTimerExW(
+            nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
+            TIMER_MODIFY_STATE | SYNCHRONIZE);
+#endif
+    }
+
+    ~AudioBlockPacer() {
+#if defined(_WIN32)
+        if (timer_) CloseHandle(timer_);
+#endif
+    }
+
+    void wait() {
+        nextBlock_ += std::chrono::duration_cast<
+            std::chrono::steady_clock::duration>(kCallbackPeriod);
+        const auto remaining = nextBlock_ - std::chrono::steady_clock::now();
+        if (remaining <= std::chrono::steady_clock::duration::zero()) {
+            nextBlock_ = std::chrono::steady_clock::now();
+            return;
+        }
+
+#if defined(_WIN32)
+        if (timer_) {
+            using HundredNanoseconds =
+                std::chrono::duration<std::int64_t, std::ratio<1, 10'000'000>>;
+            const auto ticks =
+                std::chrono::duration_cast<HundredNanoseconds>(remaining).count();
+            LARGE_INTEGER dueTime{};
+            dueTime.QuadPart = -std::max<std::int64_t>(ticks, 1);
+            if (SetWaitableTimer(timer_, &dueTime, 0, nullptr, nullptr, FALSE)) {
+                WaitForSingleObject(timer_, INFINITE);
+                return;
+            }
+        }
+#endif
+        std::this_thread::sleep_until(nextBlock_);
+    }
+
+private:
+    std::chrono::steady_clock::time_point nextBlock_;
+#if defined(_WIN32)
+    HANDLE timer_ = nullptr;
+#endif
 };
 
 void render(ClockworkEmbed* engine, StereoBuffers& buffers) {
@@ -106,13 +164,14 @@ int main() {
         }
 
         StereoBuffers buffers;
+        AudioBlockPacer pacer;
         const auto startupDeadline =
             std::chrono::steady_clock::now() + std::chrono::seconds(60);
         while (!runtime.ready() &&
                !runtime.failed() &&
                std::chrono::steady_clock::now() < startupDeadline) {
             render(engine, buffers);
-            std::this_thread::sleep_for(kCallbackPeriod);
+            pacer.wait();
         }
         if (!runtime.ready()) {
             throw std::runtime_error(runtime.error().empty()
@@ -139,7 +198,7 @@ int main() {
                     ++samples;
                 }
             }
-            std::this_thread::sleep_for(kCallbackPeriod);
+            pacer.wait();
         }
 
         const double rms = std::sqrt(energy / static_cast<double>(samples));
