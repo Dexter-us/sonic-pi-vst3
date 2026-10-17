@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<vstgui-ui-description version="1">
+  <fonts>
+    <font name="CodeFont" font-name="monospace" size="14"/>
+  </fonts>
+  <colors>
+    <color name="Panel" rgba="#171a22ff"/>
+    <color name="Editor" rgba="#101319ff"/>
+    <color name="Text" rgba="#edf0f7ff"/>
+    <color name="Muted" rgba="#a7afbdff"/>
+    <color name="Accent" rgba="#e44b31ff"/>
+    <color name="Border" rgba="#343a46ff"/>
+  </colors>
+  <control-tags>
+    <control-tag name="RunCode" tag="1000"/>
+    <control-tag name="StopAll" tag="1001"/>
+    <control-tag name="Status" tag="1002"/>
+  </control-tags>
+  <template background-color="Panel" class="CViewContainer" name="view"
+            origin="0, 0" size="720, 500" minSize="720, 500" maxSize="720, 500"
+            transparent="false" mouse-enabled="true">
+    <view back-color="Panel" class="CTextLabel" font="~ NormalFontBig"
+          font-antialias="true" font-color="Text" frame-color="Panel"
+          frame-width="0" origin="26, 20" size="300, 28"
+          text-alignment="left" title="Sonic Pi  /  Live Code"
+          transparent="true"/>
+    <view back-color="Panel" class="CTextLabel" font="~ NormalFont"
+          font-antialias="true" font-color="Muted" frame-color="Panel"
+          frame-width="0" origin="27, 53" size="650, 20"
+          text-alignment="left"
+          title="Runs Sonic Pi's Ruby live-coding runtime. Host MIDI is not connected."
+          transparent="true"/>
+    <view class="CViewContainer" sub-controller="LiveCodeController"
+          origin="24, 88" size="672, 390" transparent="true"
+          mouse-enabled="true">
+      <view class="CView" custom-view-name="SonicPiTextEditor"
+            origin="0, 0" size="672, 324" transparent="false"/>
+      <view back-color="Accent" class="CTextButton" control-tag="RunCode"
+            font="~ NormalFont" font-antialias="true" font-color="Text"
+            frame-color="Accent" frame-width="1" origin="0, 340"
+            size="112, 38" text-alignment="center" title="Run"
+            transparent="false"/>
+      <view back-color="Border" class="CTextButton" control-tag="StopAll"
+            font="~ NormalFont" font-antialias="true" font-color="Text"
+            frame-color="Border" frame-width="1" origin="124, 340"
+            size="112, 38" text-alignment="center" title="Stop"
+            transparent="false"/>
+      <view back-color="Panel" class="CTextLabel" control-tag="Status"
+            font="~ NormalFontSmall" font-antialias="true"
+            font-color="Muted" frame-color="Panel" frame-width="0"
+            origin="252, 349" size="420, 20" text-alignment="left"
+            title="Runtime starts when the VST is activated"
+            transparent="true"/>
+    </view>
+  </template>
+</vstgui-ui-description>
