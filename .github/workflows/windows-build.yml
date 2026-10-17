@@ -1,0 +1,39 @@
+name: Windows VST3 build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@1.88.0
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+
+      - name: Build, validate, and run audio probes
+        shell: pwsh
+        run: |
+          if (Test-Path -LiteralPath ".\native\sonic-pi-callback-spike\scripts\windows-build.ps1") {
+            & ".\native\sonic-pi-callback-spike\scripts\windows-build.ps1"
+          } else {
+            & ".\scripts\windows-build.ps1"
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sonic-pi-vst3-windows-x64
+          path: |
+            native/sonic-pi-callback-spike/build-windows/VST3/Release/sonic_pi_vst3.vst3
+            build-windows/VST3/Release/sonic_pi_vst3.vst3
+          if-no-files-found: error
