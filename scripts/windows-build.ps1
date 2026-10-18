@@ -136,6 +136,57 @@ foreach ($relativeBinPath in @("msys64\ucrt64\bin", "msys64\usr\bin")) {
             -Destination (Join-Path $destinationBin $dll.Name) -Force
     }
 }
+
+$rubyBytesBeforePrune = (Get-ChildItem -LiteralPath $rubyBundleRoot -Recurse -File |
+    Measure-Object -Property Length -Sum).Sum
+Write-Host ("Ruby bundle before documentation cleanup: {0:N2} MB" -f
+    ($rubyBytesBeforePrune / 1MB))
+
+# Keep Ruby's interpreter, standard libraries, gems, and native extensions.
+# Remove material used only for development, package caching, or documentation.
+$rubyPrunePaths = @(
+    "share\doc",
+    "share\man",
+    "share\ri",
+    "lib\ruby\gems\3.2.0\cache",
+    "lib\ruby\gems\3.2.0\doc",
+    "lib\ruby\3.2.0\rdoc",
+    "lib\ruby\3.2.0\irb",
+    "lib\ruby\3.2.0\test",
+    "lib\ruby\3.2.0\tk",
+    "lib\ruby\3.2.0\tkextlib"
+)
+foreach ($relativePath in $rubyPrunePaths) {
+    $pathToPrune = Join-Path $rubyBundleRoot $relativePath
+    if (Test-Path -LiteralPath $pathToPrune) {
+        Remove-Item -LiteralPath $pathToPrune -Recurse -Force
+    }
+}
+
+$gemPayloadRoot = Join-Path $rubyBundleRoot "lib\ruby\gems\3.2.0\gems"
+if (Test-Path -LiteralPath $gemPayloadRoot -PathType Container) {
+    $nonRuntimeGemDirectories = @("doc", "docs", "test", "tests", "spec",
+        "specs", "examples", "benchmarks")
+    $gemDirectoriesToPrune = Get-ChildItem -LiteralPath $gemPayloadRoot `
+        -Directory -Recurse |
+        Where-Object { $_.Name -in $nonRuntimeGemDirectories } |
+        Sort-Object { $_.FullName.Length } -Descending
+    foreach ($directory in $gemDirectoriesToPrune) {
+        Remove-Item -LiteralPath $directory.FullName -Recurse -Force
+    }
+}
+
+$rubyDevelopmentExtensions = @(".pdb", ".lib", ".a", ".exp", ".obj", ".ilk")
+$rubyDevelopmentFiles = Get-ChildItem -LiteralPath $rubyBundleRoot -Recurse -File |
+    Where-Object { $_.Extension -in $rubyDevelopmentExtensions }
+foreach ($file in $rubyDevelopmentFiles) {
+    Remove-Item -LiteralPath $file.FullName -Force
+}
+$rubyBytesAfterPrune = (Get-ChildItem -LiteralPath $rubyBundleRoot -Recurse -File |
+    Measure-Object -Property Length -Sum).Sum
+Write-Host ("Ruby bundle after documentation cleanup: {0:N2} MB" -f
+    ($rubyBytesAfterPrune / 1MB))
+
 $bundledRuby = Join-Path $rubyBundleRoot "bin\ruby.exe"
 if (-not (Test-Path -LiteralPath $bundledRuby -PathType Leaf)) {
     throw "Ruby 3.2 was not copied into the VST3 bundle."
@@ -152,7 +203,9 @@ Ruby: $($bundledRubyInfo -join " ")
 
 The sonic-pi directory contains the upstream Sonic Pi runtime source, assets,
 and license. The ruby directory contains Ruby runtime files and required DLLs;
-MSYS2 build tools and headers are excluded.
+MSYS2 build tools, headers, documentation, test payloads, and package caches
+are excluded while the interpreter, standard libraries, gems, and extensions
+are retained.
 See the included upstream license files before redistribution.
 "@
 Set-Content -LiteralPath (Join-Path $runtimeRoot "README.txt") `

@@ -21,8 +21,9 @@ Dexter U.S., and the editor header carries the same branding.
   active plug-in instance per host process.
 - The Windows build has passed the VST3 SDK validator and command-line audio
   probes, but the plug-in still needs a real DAW installation and live-use test.
-  Its bundle contains Sonic Pi source/assets and Ruby runtime DLLs, not the MSYS2
-  compiler toolchain.
+  Its bundle contains Sonic Pi source/assets and a trimmed Ruby runtime. The
+  package excludes Ruby build tools, headers, documentation, test payloads, and
+  caches while retaining the interpreter, libraries, gems, and required DLLs.
 
 ## Build and run
 
@@ -32,8 +33,9 @@ Steinberg VST3 SDK v3.8.1, including their required submodules. Ruby 3.2 must be
 available on `PATH` when building and validating the runtime. Windows builds use
 the Visual Studio 2022 x64 generator; the build script copies Ruby and the fetched
 Sonic Pi source/assets into the VST3 bundle, so an installed plug-in does not use
-the build machine's Ruby or source checkout. MSYS2 compiler tools and headers are
-excluded from the bundled Ruby runtime.
+the build machine's Ruby or source checkout. The bundled Ruby excludes MSYS2
+build tools, headers, documentation, test payloads, and package caches while
+retaining the interpreter, standard libraries, gems, and required DLLs.
 
 ```sh
 cmake -S . \
