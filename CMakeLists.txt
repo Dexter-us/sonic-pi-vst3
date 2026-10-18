@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(sonic_pi_callback_spike VERSION 0.1.0 LANGUAGES C CXX)
+project(sonic_pi_callback_spike VERSION 0.1.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -246,6 +246,4 @@ smtg_target_add_plugin_resources(sonic_pi_vst3
     RESOURCES
         resource/sonic_pi.uidesc
 )
-
-
 

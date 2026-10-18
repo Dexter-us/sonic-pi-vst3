@@ -178,7 +178,7 @@ bool Controller::sendStopAll() {
 void Controller::onTextEditorCreated(const VSTGUI::ITextEditor& editor) {
     codeEditor_ = &editor;
     VSTGUI::ITextEditor::Style style;
-    style.font = VSTGUI::makeOwned<VSTGUI::CFontDesc>("monospace", 14);
+    style.font = VSTGUI::makeOwned<VSTGUI::CFontDesc>("Consolas", 16);
     style.textColor = VSTGUI::CColor(237, 240, 247, 255);
     style.backColor = VSTGUI::CColor(16, 19, 25, 255);
     style.cursorColor = VSTGUI::CColor(237, 240, 247, 255);

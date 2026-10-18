@@ -20,7 +20,7 @@ DEF_CLASS2(
     SonicPiVst3::kPluginName,
     Vst::kDistributable,
     PlugType::kInstrumentSynth,
-    "0.1.0",
+    SonicPiVst3::kPluginVersion,
     kVstVersionString,
     SonicPiVst3::Processor::createInstance)
 
@@ -31,7 +31,7 @@ DEF_CLASS2(
     "Dexter U.S. Sonic Pi Controller",
     0,
     "",
-    "0.1.0",
+    SonicPiVst3::kPluginVersion,
     kVstVersionString,
     SonicPiVst3::Controller::createInstance)
 

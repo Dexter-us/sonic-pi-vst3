@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <vstgui-ui-description version="1">
   <fonts>
-    <font name="CodeFont" font-name="monospace" size="14"/>
+    <font name="CodeFont" font-name="Consolas" size="16"/>
   </fonts>
   <colors>
     <color name="Panel" rgba="#171a22ff"/>
@@ -22,7 +22,7 @@
     <view back-color="Panel" class="CTextLabel" font="~ NormalFontBig"
           font-antialias="true" font-color="Text" frame-color="Border"
           frame-width="1" origin="18, 12" size="684, 42"
-          text-alignment="left" title="Dexter U.S. Sonic Pi"
+          text-alignment="left" title="Dexter U.S. Sonic Pi v0.1.1"
           transparent="false"/>
     <view back-color="Panel" class="CTextLabel" font="~ NormalFont"
           font-antialias="true" font-color="Muted" frame-color="Panel"
