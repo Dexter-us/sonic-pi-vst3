@@ -57,8 +57,10 @@ if (-not $pluginBinary) {
 $runtimeRoot = Join-Path $pluginBundle "Contents\Resources\SonicPiVstRuntime"
 $sonicPiRoot = Join-Path $runtimeRoot "sonic-pi"
 $sonicPiSourceRoot = Join-Path $buildRoot "_deps\sonic_pi_runtime-src"
-if (-not (Test-Path -LiteralPath (Join-Path $sonicPiSourceRoot "LICENSE.md") -PathType Leaf)) {
-    throw "The fetched Sonic Pi source tree is missing."
+foreach ($requiredSourceFile in @("LICENSE.md", "VERSION")) {
+    if (-not (Test-Path -LiteralPath (Join-Path $sonicPiSourceRoot $requiredSourceFile) -PathType Leaf)) {
+        throw "The fetched Sonic Pi source tree is missing $requiredSourceFile."
+    }
 }
 if (Test-Path -LiteralPath $sonicPiRoot) {
     Remove-Item -LiteralPath $sonicPiRoot -Recurse -Force
@@ -91,6 +93,8 @@ Copy-RuntimeTree `
     (Join-Path $sonicPiRoot "etc")
 Copy-Item -LiteralPath (Join-Path $sonicPiSourceRoot "LICENSE.md") `
     -Destination (Join-Path $sonicPiRoot "LICENSE.md") -Force
+Copy-Item -LiteralPath (Join-Path $sonicPiSourceRoot "VERSION") `
+    -Destination (Join-Path $sonicPiRoot "VERSION") -Force
 
 $rubyCommand = Get-Command ruby.exe -ErrorAction Stop
 $rubyExecutable = $rubyCommand.Source
