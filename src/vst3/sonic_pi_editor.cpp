@@ -48,27 +48,23 @@ public:
         return nullptr;
     }
 
-    void valueChanged(VSTGUI::CControl*) override {}
-    void controlBeginEdit(VSTGUI::CControl*) override {}
+    void valueChanged(VSTGUI::CControl* control) override {
+        // CTextButton's default kick style resets to its minimum value before
+        // controlEndEdit, so dispatch actions while the clicked value is high.
+        if (!control || control->getValueNormalized() <= 0.5f) return;
 
-    void controlEndEdit(VSTGUI::CControl* control) override {
-        if (!control) return;
-        if (control->getTag() == kRunCodeTag &&
-            control->getValueNormalized() > 0.5f) {
+        if (control->getTag() == kRunCodeTag) {
             const bool sent = owner_->sendCurrentCode();
             showStatus(sent ? "Code sent to Sonic Pi"
                             : "Runtime is starting or inactive; try again shortly");
-            control->setValue(0.0f);
-            control->invalid();
-        } else if (control->getTag() == kStopAllTag &&
-                   control->getValueNormalized() > 0.5f) {
+        } else if (control->getTag() == kStopAllTag) {
             const bool sent = owner_->sendStopAll();
             showStatus(sent ? "Stop requested"
                             : "Runtime is starting or inactive; try again shortly");
-            control->setValue(0.0f);
-            control->invalid();
         }
     }
+    void controlBeginEdit(VSTGUI::CControl*) override {}
+    void controlEndEdit(VSTGUI::CControl*) override {}
 
     VSTGUI::CView* verifyView(
         VSTGUI::CView* view,

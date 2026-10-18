@@ -22,7 +22,7 @@
     <view back-color="Panel" class="CTextLabel" font="~ NormalFontBig"
           font-antialias="true" font-color="Text" frame-color="Border"
           frame-width="1" origin="18, 12" size="524, 42"
-          text-alignment="left" title="Dexter U.S. Sonic Pi v0.1.2"
+          text-alignment="left" title="Dexter U.S. Sonic Pi v0.1.3"
           transparent="false"/>
     <view back-color="Panel" class="CTextLabel" font="~ NormalFont"
           font-antialias="true" font-color="Muted" frame-color="Panel"
