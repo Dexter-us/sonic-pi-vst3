@@ -2,7 +2,7 @@
 
 This prototype combines the upstream Sonic Pi Ruby runtime with the
 SuperSonic/scsynth engine in a loadable VST3. Its VSTGUI editor contains a
-multi-line Sonic Pi code editor and Run/Stop controls. The audio callback
+multi-line Sonic Pi code editor with Open/Save and Run/Stop controls. The audio callback
 renders directly into the host's stereo output buffers; a separate worker runs
 the Sonic Pi language runtime. It is registered as an Instrument/Synth by
 Dexter U.S., and the editor header carries the same branding.

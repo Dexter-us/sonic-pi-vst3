@@ -11,6 +11,6 @@ inline const Steinberg::FUID kControllerClassId(
     0x6c8d0f52, 0x37ab4e91, 0xa45d826c, 0x19f03b77);
 
 inline constexpr char kPluginName[] = "Dexter U.S. Sonic Pi";
-inline constexpr char kPluginVersion[] = "0.1.5";
+inline constexpr char kPluginVersion[] = "0.1.6";
 
 } // namespace SonicPiVst3

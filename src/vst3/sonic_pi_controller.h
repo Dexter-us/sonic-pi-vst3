@@ -34,6 +34,8 @@ public:
         VSTGUI::VST3Editor* editor) override;
 
     bool sendRunCode(const std::string& code);
+    std::string currentCode() const;
+    bool replaceCurrentCode(const std::string& code);
     bool sendCurrentCode();
     bool sendStopAll();
     bool requestRuntimeStatus();

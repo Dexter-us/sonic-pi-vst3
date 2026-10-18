@@ -1,17 +1,30 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "sonic_pi_controller.h"
+#include "plugin_ids.h"
 
 #include "pluginterfaces/vst/ivstmessage.h"
 #include "pluginterfaces/base/ustring.h"
+#include "vstgui/lib/cfileselector.h"
 #include "vstgui/lib/cvstguitimer.h"
 #include "vstgui/uidescription/uiattributes.h"
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <iterator>
 #include <string>
 #include <string_view>
+#include <utility>
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace SonicPiVst3 {
 namespace {
@@ -19,6 +32,9 @@ namespace {
 constexpr Steinberg::int32 kRunCodeTag = 1000;
 constexpr Steinberg::int32 kStopAllTag = 1001;
 constexpr Steinberg::int32 kStatusTag = 1002;
+constexpr Steinberg::int32 kOpenCodeTag = 1003;
+constexpr Steinberg::int32 kSaveCodeTag = 1004;
+constexpr Steinberg::int32 kDocumentTitleTag = 1005;
 
 const char* statusText(RuntimeStatus status) {
     switch (status) {
@@ -40,6 +56,92 @@ const char* statusText(RuntimeStatus status) {
         default:
             return "Runtime inactive - activate the plug-in";
     }
+}
+
+std::string fileNameFromUtf8Path(const std::string& path) {
+    const auto separator = path.find_last_of("/\\");
+    return separator == std::string::npos ? path : path.substr(separator + 1);
+}
+
+std::string normalizeLineEndings(std::string text) {
+    std::string normalized;
+    normalized.reserve(text.size());
+    for (std::size_t index = 0; index < text.size(); ++index) {
+        if (text[index] == '\r') {
+            normalized.push_back('\n');
+            if (index + 1 < text.size() && text[index + 1] == '\n') ++index;
+        } else {
+            normalized.push_back(text[index]);
+        }
+    }
+    return normalized;
+}
+
+std::filesystem::path pathFromUtf8(const std::string& path) {
+    const auto* begin = reinterpret_cast<const char8_t*>(path.data());
+    return std::filesystem::path(std::u8string(begin, begin + path.size()));
+}
+
+bool readCodeFile(const std::string& utf8Path, std::string& code) {
+    std::ifstream input(pathFromUtf8(utf8Path), std::ios::binary);
+    if (!input) return false;
+
+    code.assign(std::istreambuf_iterator<char>(input),
+                std::istreambuf_iterator<char>());
+    if (input.bad() || code.size() > 16 * 1024 * 1024 ||
+        code.find('\0') != std::string::npos) {
+        code.clear();
+        return false;
+    }
+
+    // Remove an optional UTF-8 BOM and normalize Windows/Mac line endings for
+    // the editor's newline-based line numbering and syntax highlighting.
+    if (code.size() >= 3 &&
+        static_cast<unsigned char>(code[0]) == 0xEF &&
+        static_cast<unsigned char>(code[1]) == 0xBB &&
+        static_cast<unsigned char>(code[2]) == 0xBF) {
+        code.erase(0, 3);
+    }
+    code = normalizeLineEndings(std::move(code));
+    return true;
+}
+
+bool writeCodeFile(const std::string& utf8Path, const std::string& code) {
+    std::ofstream output(pathFromUtf8(utf8Path),
+                         std::ios::binary | std::ios::trunc);
+    if (!output) return false;
+    output.write(code.data(), static_cast<std::streamsize>(code.size()));
+    output.flush();
+    return output.good();
+}
+
+std::string chooseCodeFile(VSTGUI::CControl* control, bool save) {
+    auto* selector = VSTGUI::CNewFileSelector::create(
+        control ? control->getFrame() : nullptr,
+        save ? VSTGUI::CNewFileSelector::kSelectSaveFile
+             : VSTGUI::CNewFileSelector::kSelectFile);
+    if (!selector) return {};
+
+    const VSTGUI::CFileExtension rubySource(
+        "Sonic Pi code (*.rb)", "rb", "text/x-ruby");
+    selector->setTitle(save ? "Save Sonic Pi code" : "Open Sonic Pi code");
+    selector->addFileExtension(rubySource);
+    selector->addFileExtension(
+        VSTGUI::CFileExtension("Text files (*.txt)", "txt", "text/plain"));
+    selector->addFileExtension(VSTGUI::CNewFileSelector::getAllFilesExtension());
+    if (save) {
+        selector->setDefaultExtension(rubySource);
+        selector->setDefaultSaveName("untitled.rb");
+    }
+
+    std::string selectedPath;
+    if (selector->runModal() && selector->getNumSelectedFiles() > 0) {
+        if (const auto* selected = selector->getSelectedFile(0)) {
+            selectedPath = selected;
+        }
+    }
+    selector->forget();
+    return selectedPath;
 }
 
 const VSTGUI::CColor kEditorTextColor(237, 240, 247, 255);
@@ -228,7 +330,11 @@ public:
         // controlEndEdit, so dispatch actions while the clicked value is high.
         if (!control || control->getValueNormalized() <= 0.5f) return;
 
-        if (control->getTag() == kRunCodeTag) {
+        if (control->getTag() == kOpenCodeTag) {
+            openCodeFile(control);
+        } else if (control->getTag() == kSaveCodeTag) {
+            saveCodeFile(control);
+        } else if (control->getTag() == kRunCodeTag) {
             const bool sent = owner_->sendCurrentCode();
             showStatus(sent ? "Run request submitted..."
                             : "Run request failed; checking runtime status...");
@@ -250,6 +356,10 @@ public:
                 statusLabel_ = label;
                 statusLabel_->registerViewListener(this);
                 statusLabel_->setText("Waiting for VST activation...");
+            } else if (label->getTag() == kDocumentTitleTag) {
+                documentTitleLabel_ = label;
+                documentTitleLabel_->registerViewListener(this);
+                refreshDocumentTitle();
             }
         }
         return view;
@@ -260,6 +370,10 @@ public:
             statusTimer_ = nullptr;
             statusLabel_->unregisterViewListener(this);
             statusLabel_ = nullptr;
+        }
+        if (view == documentTitleLabel_) {
+            documentTitleLabel_->unregisterViewListener(this);
+            documentTitleLabel_ = nullptr;
         }
         if (view == codeEditorView_) {
             codeEditorView_->unregisterViewListener(this);
@@ -285,7 +399,92 @@ private:
     void refreshStatus() {
         if (!statusLabel_) return;
         owner_->requestRuntimeStatus();
+        refreshDocumentTitle();
+        if (std::chrono::steady_clock::now() < noticeUntil_) {
+            showStatus(noticeText_.c_str());
+            return;
+        }
         showStatus(statusText(owner_->runtimeStatus()));
+    }
+
+    void refreshDocumentTitle() {
+        if (!documentTitleLabel_) return;
+        const auto code = owner_->currentCode();
+        const bool dirty = code != savedCode_;
+        std::string title = "Dexter U.S. Sonic Pi v";
+        title += kPluginVersion;
+        title += " - ";
+        if (dirty) title += "*";
+        title += currentFilePath_.empty()
+                     ? "Untitled"
+                     : fileNameFromUtf8Path(currentFilePath_);
+        documentTitleLabel_->setText(title.c_str());
+    }
+
+    void showNotice(std::string text) {
+        noticeText_ = std::move(text);
+        noticeUntil_ = std::chrono::steady_clock::now() +
+                       std::chrono::seconds(4);
+        showStatus(noticeText_.c_str());
+    }
+
+    bool hasUnsavedChanges() const {
+        return owner_->currentCode() != savedCode_;
+    }
+
+    bool saveCodeFile(VSTGUI::CControl* control) {
+        const auto code = owner_->currentCode();
+        std::string path = currentFilePath_;
+        if (path.empty()) path = chooseCodeFile(control, true);
+        if (path.empty()) return false;
+        if (!writeCodeFile(path, code)) {
+            showNotice("Could not save code file");
+            return false;
+        }
+
+        currentFilePath_ = std::move(path);
+        savedCode_ = code;
+        refreshDocumentTitle();
+        showNotice("Saved " + fileNameFromUtf8Path(currentFilePath_));
+        return true;
+    }
+
+    void openCodeFile(VSTGUI::CControl* control) {
+        const auto path = chooseCodeFile(control, false);
+        if (path.empty()) return;
+
+        if (hasUnsavedChanges()) {
+#if defined(_WIN32)
+            const auto choice = ::MessageBoxW(
+                nullptr,
+                L"This code has unsaved changes. Save before opening another file?",
+                L"Dexter U.S. Sonic Pi",
+                MB_YESNOCANCEL | MB_ICONWARNING | MB_SETFOREGROUND);
+            if (choice == IDYES) {
+                if (!saveCodeFile(control)) return;
+            } else if (choice != IDNO) {
+                return;
+            }
+#else
+            showNotice("Save current code before opening another file");
+            return;
+#endif
+        }
+
+        std::string code;
+        if (!readCodeFile(path, code)) {
+            showNotice("Could not read code file");
+            return;
+        }
+        if (!owner_->replaceCurrentCode(code)) {
+            showNotice("Could not load code into editor");
+            return;
+        }
+
+        currentFilePath_ = path;
+        savedCode_ = std::move(code);
+        refreshDocumentTitle();
+        showNotice("Loaded " + fileNameFromUtf8Path(currentFilePath_));
     }
 
     void detach(VSTGUI::CView* view) {
@@ -300,8 +499,13 @@ private:
 
     Controller* owner_ = nullptr;
     VSTGUI::CTextLabel* statusLabel_ = nullptr;
+    VSTGUI::CTextLabel* documentTitleLabel_ = nullptr;
     VSTGUI::CView* codeEditorView_ = nullptr;
     VSTGUI::SharedPointer<VSTGUI::CVSTGUITimer> statusTimer_;
+    std::string currentFilePath_;
+    std::string savedCode_ = kStarterCode;
+    std::string noticeText_;
+    std::chrono::steady_clock::time_point noticeUntil_{};
 };
 
 } // namespace
@@ -351,6 +555,14 @@ bool Controller::sendRunCode(const std::string& code) {
 
 bool Controller::sendCurrentCode() {
     return codeEditor_ && sendRunCode(codeEditor_->getPlainText());
+}
+
+std::string Controller::currentCode() const {
+    return codeEditor_ ? codeEditor_->getPlainText() : std::string{};
+}
+
+bool Controller::replaceCurrentCode(const std::string& code) {
+    return codeEditor_ && codeEditor_->setPlainText(code, true);
 }
 
 bool Controller::sendStopAll() {
