@@ -247,20 +247,5 @@ smtg_target_add_plugin_resources(sonic_pi_vst3
         resource/sonic_pi.uidesc
 )
 
-if(WIN32)
-    set(SONIC_PI_VST_RUNTIME_BUNDLE_DIR
-        "$<TARGET_FILE_DIR:sonic_pi_vst3>/../Resources/SonicPiVstRuntime")
-    add_custom_command(TARGET sonic_pi_vst3 POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E rm -rf
-            "${SONIC_PI_VST_RUNTIME_BUNDLE_DIR}/sonic-pi"
-        COMMAND ${CMAKE_COMMAND} -E make_directory
-            "${SONIC_PI_VST_RUNTIME_BUNDLE_DIR}"
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${sonic_pi_runtime_SOURCE_DIR}"
-            "${SONIC_PI_VST_RUNTIME_BUNDLE_DIR}/sonic-pi"
-        COMMENT "Bundling Sonic Pi source and assets into the Windows VST3"
-        VERBATIM
-    )
-endif()
 
 

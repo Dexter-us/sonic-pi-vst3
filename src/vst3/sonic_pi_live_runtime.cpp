@@ -167,6 +167,18 @@ std::vector<wchar_t> childEnvironmentBlock(
     LPWCH source = GetEnvironmentStringsW();
     if (!source) return {};
     bool replacedPath = false;
+    std::wstring rubySearchPath;
+    if (!rubyBin.empty()) {
+        rubySearchPath = rubyBin.native();
+        const auto rubyRoot = rubyBin.parent_path();
+        for (const auto& extraPath : {
+                 rubyRoot / L"msys64" / L"ucrt64" / L"bin",
+                 rubyRoot / L"msys64" / L"usr" / L"bin"}) {
+            if (std::filesystem::is_directory(extraPath)) {
+                rubySearchPath += L";" + extraPath.native();
+            }
+        }
+    }
     for (const wchar_t* current = source; *current;) {
         std::wstring entry(current);
         current += entry.size() + 1;
@@ -176,7 +188,7 @@ std::vector<wchar_t> childEnvironmentBlock(
             continue;
         }
         if (!rubyBin.empty() && _wcsnicmp(entry.c_str(), L"PATH=", 5) == 0) {
-            entries.push_back(L"PATH=" + rubyBin.native() + L";" +
+            entries.push_back(L"PATH=" + rubySearchPath + L";" +
                               entry.substr(5));
             replacedPath = true;
             continue;
@@ -189,7 +201,7 @@ std::vector<wchar_t> childEnvironmentBlock(
     entries.push_back(L"SONIC_PI_ETC_PATH=" + (root / L"etc").native());
     entries.push_back(L"SONIC_PI_HOME=" + userHome.native());
     if (!rubyBin.empty() && !replacedPath) {
-        entries.push_back(L"PATH=" + rubyBin.native());
+        entries.push_back(L"PATH=" + rubySearchPath);
     }
     std::sort(entries.begin(), entries.end(),
               [](const std::wstring& left, const std::wstring& right) {

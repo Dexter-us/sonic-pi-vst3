@@ -56,6 +56,42 @@ if (-not $pluginBinary) {
 
 $runtimeRoot = Join-Path $pluginBundle "Contents\Resources\SonicPiVstRuntime"
 $sonicPiRoot = Join-Path $runtimeRoot "sonic-pi"
+$sonicPiSourceRoot = Join-Path $buildRoot "_deps\sonic_pi_runtime-src"
+if (-not (Test-Path -LiteralPath (Join-Path $sonicPiSourceRoot "LICENSE.md") -PathType Leaf)) {
+    throw "The fetched Sonic Pi source tree is missing."
+}
+if (Test-Path -LiteralPath $sonicPiRoot) {
+    Remove-Item -LiteralPath $sonicPiRoot -Recurse -Force
+}
+
+function Copy-RuntimeTree {
+    param(
+        [Parameter(Mandatory = $true)][string]$Source,
+        [Parameter(Mandatory = $true)][string]$Destination
+    )
+    if (-not (Test-Path -LiteralPath $Source -PathType Container)) {
+        throw "A required Sonic Pi runtime directory is missing: $Source"
+    }
+    New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+    & robocopy $Source $Destination /E /COPY:DAT /DCOPY:DAT /XJ `
+        /R:1 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+    if ($LASTEXITCODE -ge 8) {
+        throw "Could not stage Sonic Pi runtime files from $Source (robocopy exit $LASTEXITCODE)."
+    }
+}
+
+Copy-RuntimeTree `
+    (Join-Path $sonicPiSourceRoot "app\server\ruby") `
+    (Join-Path $sonicPiRoot "app\server\ruby")
+Copy-RuntimeTree `
+    (Join-Path $sonicPiSourceRoot "app\server\native") `
+    (Join-Path $sonicPiRoot "app\server\native")
+Copy-RuntimeTree `
+    (Join-Path $sonicPiSourceRoot "etc") `
+    (Join-Path $sonicPiRoot "etc")
+Copy-Item -LiteralPath (Join-Path $sonicPiSourceRoot "LICENSE.md") `
+    -Destination (Join-Path $sonicPiRoot "LICENSE.md") -Force
+
 $rubyCommand = Get-Command ruby.exe -ErrorAction Stop
 $rubyExecutable = $rubyCommand.Source
 $rubyInstallRoot = Split-Path (Split-Path $rubyExecutable -Parent) -Parent
@@ -83,8 +119,8 @@ Self-contained Sonic Pi runtime for the Sonic Pi VST3 prototype.
 Sonic Pi source: v5.0.0
 Ruby: $($bundledRubyInfo -join " ")
 
-The sonic-pi directory contains the upstream Sonic Pi source and runtime
-assets. The ruby directory contains the Ruby installation used by the plug-in.
+The sonic-pi directory contains the upstream Sonic Pi runtime source, assets,
+and license. The ruby directory contains the Ruby installation used by the plug-in.
 See the included upstream license files before redistribution.
 "@
 Set-Content -LiteralPath (Join-Path $runtimeRoot "README.txt") `
