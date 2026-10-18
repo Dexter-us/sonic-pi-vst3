@@ -11,7 +11,8 @@ namespace SonicPiVst3 {
 
 class Controller final : public Steinberg::Vst::EditController,
                          public VSTGUI::VST3EditorDelegate,
-                         public VSTGUI::TextEditorControllerAdapter {
+                         public VSTGUI::TextEditorControllerAdapter,
+                         public VSTGUI::TextEditorColorization::IStyleProvider {
 public:
     ~Controller() override;
 
@@ -38,12 +39,21 @@ public:
     void onTextEditorDestroyed(const VSTGUI::ITextEditor& editor) override;
     void onTextEditorTextChanged(const VSTGUI::ITextEditor&) override {}
 
+    void beginDraw(
+        const VSTGUI::TextEditorColorization::IEditorExt& editor) override;
+    VSTGUI::TextEditorColorization::IStyleProvider::Styles getStyles(
+        const VSTGUI::TextEditorColorization::IEditorExt& editor,
+        size_t beginOffset, size_t length) override;
+    void endDraw(
+        const VSTGUI::TextEditorColorization::IEditorExt& editor) override;
+
     DELEGATE_REFCOUNT(EditController)
     Steinberg::tresult PLUGIN_API queryInterface(
         const char* iid, void** obj) override;
 
 private:
     const VSTGUI::ITextEditor* codeEditor_ = nullptr;
+    VSTGUI::TextEditorColorization::IStyleProvider::Styles syntaxStyles_;
 };
 
 } // namespace SonicPiVst3
