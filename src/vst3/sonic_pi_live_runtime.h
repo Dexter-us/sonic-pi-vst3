@@ -2,6 +2,7 @@
 #pragma once
 
 #include "clockwork_client.h"
+#include "sonic_pi_runtime_status.h"
 
 #include <memory>
 #include <string>
@@ -26,6 +27,7 @@ public:
     bool stopAllJobs() noexcept;
     bool ready() const noexcept;
     bool failed() const noexcept;
+    RuntimeStatus status() const noexcept;
     std::string error() const;
 
 private:

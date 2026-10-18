@@ -22,7 +22,7 @@
     <view back-color="Panel" class="CTextLabel" font="~ NormalFontBig"
           font-antialias="true" font-color="Text" frame-color="Border"
           frame-width="1" origin="18, 12" size="524, 42"
-          text-alignment="left" title="Dexter U.S. Sonic Pi v0.1.4"
+          text-alignment="left" title="Dexter U.S. Sonic Pi v0.1.5"
           transparent="false"/>
     <view back-color="Panel" class="CTextLabel" font="~ NormalFont"
           font-antialias="true" font-color="Muted" frame-color="Panel"
@@ -56,7 +56,7 @@
             font="~ NormalFontSmall" font-antialias="true"
             font-color="Muted" frame-color="Panel" frame-width="0"
             origin="252, 275" size="260, 20" text-alignment="left"
-            title="Runtime starts when the VST is activated"
+            title="Waiting for VST activation..."
             transparent="true"/>
     </view>
   </template>

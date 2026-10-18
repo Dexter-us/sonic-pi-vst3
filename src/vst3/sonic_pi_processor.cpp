@@ -118,6 +118,23 @@ Steinberg::tresult PLUGIN_API Processor::notify(
             ? Steinberg::kResultOk
             : Steinberg::kResultFalse;
     }
+    if (std::strcmp(messageId, "SonicPi.GetStatus") == 0) {
+        auto response = Steinberg::owned(allocateMessage());
+        if (!response) return Steinberg::kResultFalse;
+        response->setMessageID("SonicPi.RuntimeStatus");
+        auto* attributes = response->getAttributes();
+        if (!attributes ||
+            attributes->setInt(
+                "state",
+                static_cast<Steinberg::int64>(
+                    runtime_ ? runtime_->status()
+                             : lastRuntimeStatus_)) != Steinberg::kResultOk) {
+            return Steinberg::kResultFalse;
+        }
+        return sendMessage(response) == Steinberg::kResultOk
+            ? Steinberg::kResultOk
+            : Steinberg::kResultFalse;
+    }
     return Steinberg::kNotImplemented;
 }
 
@@ -171,6 +188,7 @@ Steinberg::tresult PLUGIN_API Processor::process(
 
 bool Processor::startEngine() noexcept {
     if (engine_) return true;
+    lastRuntimeStatus_ = RuntimeStatus::failed;
     if (gEngineClaimed.test_and_set(std::memory_order_acquire)) return false;
     ownsProcessEngine_ = true;
 
@@ -199,6 +217,7 @@ bool Processor::startEngine() noexcept {
 
         runtime_ = std::make_unique<SonicPiLiveRuntime>();
         if (!runtime_->start(client_, sampleRate_)) {
+            lastRuntimeStatus_ = runtime_->status();
             std::cerr << "Sonic Pi VST runtime startup failed: "
                       << runtime_->error() << '\n';
             stopEngine();
@@ -213,6 +232,12 @@ bool Processor::startEngine() noexcept {
 
 void Processor::stopEngine() noexcept {
     if (runtime_) {
+        const auto runtimeStatus = runtime_->status();
+        lastRuntimeStatus_ =
+            runtimeStatus == RuntimeStatus::failed ||
+                    runtimeStatus == RuntimeStatus::error
+                ? runtimeStatus
+                : RuntimeStatus::inactive;
         runtime_->stop();
         runtime_.reset();
     }

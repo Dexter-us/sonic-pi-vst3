@@ -43,6 +43,7 @@ private:
     std::unique_ptr<SonicPiLiveRuntime> runtime_;
     double sampleRate_ = 48000.0;
     bool ownsProcessEngine_ = false;
+    RuntimeStatus lastRuntimeStatus_ = RuntimeStatus::inactive;
 };
 
 } // namespace SonicPiVst3

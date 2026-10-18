@@ -291,11 +291,17 @@ struct SonicPiLiveRuntime::Impl {
     std::atomic<bool> isReady{false};
     std::atomic<bool> startupFailed{false};
     std::atomic<bool> monitorRunning{false};
+    std::atomic<RuntimeStatus> uiStatus{RuntimeStatus::inactive};
+    mutable std::mutex commandMutex;
+    std::string pendingCode;
     mutable std::mutex errorMutex;
     std::string errorText;
     std::thread readinessThread;
 
     void setError(std::string message) noexcept {
+        if (!message.empty()) {
+            uiStatus.store(RuntimeStatus::failed);
+        }
         std::lock_guard<std::mutex> lock(errorMutex);
         errorText = std::move(message);
     }
@@ -303,6 +309,24 @@ struct SonicPiLiveRuntime::Impl {
     std::string getError() const {
         std::lock_guard<std::mutex> lock(errorMutex);
         return errorText;
+    }
+
+    bool sendRunCodePacket(const std::string& code) noexcept {
+        if (!SocketPlatform::initialize()) return false;
+        const auto packet = makeRunCodePacket(code);
+        const auto fd = SocketPlatform::create(AF_INET, SOCK_DGRAM, 0);
+        if (fd == SocketPlatform::kInvalidSocket) return false;
+
+        sockaddr_in destination{};
+        destination.sin_family = AF_INET;
+        destination.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        destination.sin_port = htons(controlPort);
+        const auto sent = SocketPlatform::sendTo(
+            fd, packet.data(), packet.size(), 0,
+            reinterpret_cast<const sockaddr*>(&destination),
+            static_cast<SocketPlatform::SocketLength>(sizeof(destination)));
+        SocketPlatform::close(fd);
+        return sent == static_cast<std::ptrdiff_t>(packet.size());
     }
 
     bool configureRuntimePaths() {
@@ -365,6 +389,7 @@ struct SonicPiLiveRuntime::Impl {
         if (isReady.load() || monitorRunning.load()) return true;
         startupFailed.store(false);
         setError({});
+        uiStatus.store(RuntimeStatus::starting);
         if (!configureRuntimePaths()) return false;
         const auto spiderServer = root / "app/server/ruby/bin/spider-server.rb";
 
@@ -556,7 +581,23 @@ struct SonicPiLiveRuntime::Impl {
                     std::istreambuf_iterator<char>());
                 if (content.find("Spider - Booted Successfully.") !=
                     std::string::npos) {
-                    isReady.store(true);
+                    std::string codeToRun;
+                    {
+                        std::lock_guard<std::mutex> lock(commandMutex);
+                        isReady.store(true);
+                        codeToRun.swap(pendingCode);
+                        uiStatus.store(codeToRun.empty()
+                            ? RuntimeStatus::ready
+                            : RuntimeStatus::queued);
+                    }
+                    if (!codeToRun.empty()) {
+                        if (sendRunCodePacket(codeToRun)) {
+                            uiStatus.store(RuntimeStatus::submitted);
+                        } else {
+                            setError("Could not send queued Run code to Spider");
+                            uiStatus.store(RuntimeStatus::error);
+                        }
+                    }
                     return;
                 }
                 if (content.find("Spider - Failed to start server:") !=
@@ -665,12 +706,17 @@ struct SonicPiLiveRuntime::Impl {
     void stop() noexcept {
         const bool wasReady = isReady.exchange(false);
         monitorRunning.store(false);
+        {
+            std::lock_guard<std::mutex> lock(commandMutex);
+            pendingCode.clear();
+        }
         if (readinessThread.joinable()) readinessThread.join();
         stopWorker(wasReady);
         bridge.stop();
         controlPort = 0;
         guiPort = 0;
         cuePort = 0;
+        uiStatus.store(RuntimeStatus::inactive);
     }
 };
 
@@ -691,28 +737,51 @@ void SonicPiLiveRuntime::stop() noexcept {
 }
 
 bool SonicPiLiveRuntime::runCode(const std::string& code) noexcept {
-    if (!impl_->isReady.load() || code.empty() || code.size() > kMaxCodeBytes) {
+    if (code.empty() || code.size() > kMaxCodeBytes ||
+        impl_->startupFailed.load()) {
         return false;
     }
-    if (!SocketPlatform::initialize()) return false;
-    const auto packet = makeRunCodePacket(code);
-    const auto fd = SocketPlatform::create(AF_INET, SOCK_DGRAM, 0);
-    if (fd == SocketPlatform::kInvalidSocket) return false;
 
-    sockaddr_in destination{};
-    destination.sin_family = AF_INET;
-    destination.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    destination.sin_port = htons(impl_->controlPort);
-    const auto sent = SocketPlatform::sendTo(
-        fd, packet.data(), packet.size(), 0,
-        reinterpret_cast<const sockaddr*>(&destination),
-        static_cast<SocketPlatform::SocketLength>(sizeof(destination)));
-    SocketPlatform::close(fd);
-    return sent == static_cast<std::ptrdiff_t>(packet.size());
+    {
+        std::lock_guard<std::mutex> lock(impl_->commandMutex);
+        if (!impl_->isReady.load()) {
+            if (!impl_->monitorRunning.load() ||
+                impl_->startupFailed.load()) {
+                return false;
+            }
+            // Keep only the newest editor buffer if Run is clicked more than
+            // once while Spider is still booting.
+            impl_->pendingCode = code;
+            impl_->uiStatus.store(RuntimeStatus::queued);
+            return true;
+        }
+    }
+
+    if (impl_->sendRunCodePacket(code)) {
+        impl_->uiStatus.store(RuntimeStatus::submitted);
+        return true;
+    }
+    impl_->uiStatus.store(RuntimeStatus::error);
+    return false;
 }
 
 bool SonicPiLiveRuntime::stopAllJobs() noexcept {
-    return impl_->isReady.load() && impl_->sendControl("/stop-all-jobs");
+    bool cancelledQueuedCode = false;
+    {
+        std::lock_guard<std::mutex> lock(impl_->commandMutex);
+        cancelledQueuedCode = !impl_->pendingCode.empty();
+        impl_->pendingCode.clear();
+        if (cancelledQueuedCode) {
+            impl_->uiStatus.store(RuntimeStatus::stopped);
+        }
+    }
+    if (!impl_->isReady.load()) return cancelledQueuedCode;
+    if (!impl_->sendControl("/stop-all-jobs")) {
+        impl_->uiStatus.store(RuntimeStatus::error);
+        return false;
+    }
+    impl_->uiStatus.store(RuntimeStatus::stopped);
+    return true;
 }
 
 bool SonicPiLiveRuntime::ready() const noexcept {
@@ -721,6 +790,10 @@ bool SonicPiLiveRuntime::ready() const noexcept {
 
 bool SonicPiLiveRuntime::failed() const noexcept {
     return impl_->startupFailed.load();
+}
+
+RuntimeStatus SonicPiLiveRuntime::status() const noexcept {
+    return impl_->uiStatus.load();
 }
 
 std::string SonicPiLiveRuntime::error() const {

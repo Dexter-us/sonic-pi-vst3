@@ -2,9 +2,11 @@
 #pragma once
 
 #include "public.sdk/source/vst/vsteditcontroller.h"
+#include "sonic_pi_runtime_status.h"
 #include "vstgui/plugin-bindings/vst3editor.h"
 #include "vstgui/lib/ctexteditor.h"
 
+#include <atomic>
 #include <string>
 
 namespace SonicPiVst3 {
@@ -34,6 +36,10 @@ public:
     bool sendRunCode(const std::string& code);
     bool sendCurrentCode();
     bool sendStopAll();
+    bool requestRuntimeStatus();
+    RuntimeStatus runtimeStatus() const noexcept;
+    Steinberg::tresult PLUGIN_API notify(
+        Steinberg::Vst::IMessage* message) override;
 
     void onTextEditorCreated(const VSTGUI::ITextEditor& editor) override;
     void onTextEditorDestroyed(const VSTGUI::ITextEditor& editor) override;
@@ -54,6 +60,7 @@ public:
 private:
     const VSTGUI::ITextEditor* codeEditor_ = nullptr;
     VSTGUI::TextEditorColorization::IStyleProvider::Styles syntaxStyles_;
+    std::atomic<RuntimeStatus> runtimeStatus_{RuntimeStatus::inactive};
 };
 
 } // namespace SonicPiVst3

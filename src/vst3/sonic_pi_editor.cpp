@@ -2,6 +2,8 @@
 #include "sonic_pi_controller.h"
 
 #include "pluginterfaces/vst/ivstmessage.h"
+#include "pluginterfaces/base/ustring.h"
+#include "vstgui/lib/cvstguitimer.h"
 #include "vstgui/uidescription/uiattributes.h"
 
 #include <algorithm>
@@ -17,6 +19,28 @@ namespace {
 constexpr Steinberg::int32 kRunCodeTag = 1000;
 constexpr Steinberg::int32 kStopAllTag = 1001;
 constexpr Steinberg::int32 kStatusTag = 1002;
+
+const char* statusText(RuntimeStatus status) {
+    switch (status) {
+        case RuntimeStatus::starting:
+            return "Sonic Pi runtime starting...";
+        case RuntimeStatus::ready:
+            return "Sonic Pi ready - press Run";
+        case RuntimeStatus::failed:
+            return "Startup failed - check spider-runtime.log";
+        case RuntimeStatus::queued:
+            return "Code queued until runtime is ready";
+        case RuntimeStatus::submitted:
+            return "Code sent to Sonic Pi";
+        case RuntimeStatus::stopped:
+            return "Sonic Pi jobs stopped";
+        case RuntimeStatus::error:
+            return "Command failed - check spider-runtime.log";
+        case RuntimeStatus::inactive:
+        default:
+            return "Runtime inactive - activate the plug-in";
+    }
+}
 
 const VSTGUI::CColor kEditorTextColor(237, 240, 247, 255);
 const VSTGUI::CColor kKeywordColor(198, 120, 221, 255);
@@ -178,6 +202,7 @@ public:
     explicit LiveCodeSubController(Controller* owner) : owner_(owner) {}
 
     ~LiveCodeSubController() override {
+        statusTimer_ = nullptr;
         detach(statusLabel_);
         detach(codeEditorView_);
     }
@@ -205,12 +230,12 @@ public:
 
         if (control->getTag() == kRunCodeTag) {
             const bool sent = owner_->sendCurrentCode();
-            showStatus(sent ? "Code sent to Sonic Pi"
-                            : "Runtime is starting or inactive; try again shortly");
+            showStatus(sent ? "Run request submitted..."
+                            : "Run request failed; checking runtime status...");
         } else if (control->getTag() == kStopAllTag) {
             const bool sent = owner_->sendStopAll();
-            showStatus(sent ? "Stop requested"
-                            : "Runtime is starting or inactive; try again shortly");
+            showStatus(sent ? "Stop requested..."
+                            : "Stop request failed; checking runtime status...");
         }
     }
     void controlBeginEdit(VSTGUI::CControl*) override {}
@@ -224,7 +249,7 @@ public:
             if (label->getTag() == kStatusTag) {
                 statusLabel_ = label;
                 statusLabel_->registerViewListener(this);
-                statusLabel_->setText("Runtime starts when the VST is activated");
+                statusLabel_->setText("Waiting for VST activation...");
             }
         }
         return view;
@@ -232,6 +257,7 @@ public:
 
     void viewWillDelete(VSTGUI::CView* view) override {
         if (view == statusLabel_) {
+            statusTimer_ = nullptr;
             statusLabel_->unregisterViewListener(this);
             statusLabel_ = nullptr;
         }
@@ -242,6 +268,12 @@ public:
     }
 
     void viewAttached(VSTGUI::CView* view) override {
+        if (view == statusLabel_) {
+            refreshStatus();
+            statusTimer_ = VSTGUI::makeOwned<VSTGUI::CVSTGUITimer>(
+                [this](VSTGUI::CVSTGUITimer*) { refreshStatus(); },
+                500, true);
+        }
         if (view == codeEditorView_) {
             // The starter text is set during construction, before the host has
             // attached this view. Some hosts miss that first invalidation.
@@ -250,6 +282,12 @@ public:
     }
 
 private:
+    void refreshStatus() {
+        if (!statusLabel_) return;
+        owner_->requestRuntimeStatus();
+        showStatus(statusText(owner_->runtimeStatus()));
+    }
+
     void detach(VSTGUI::CView* view) {
         if (view) {
             view->unregisterViewListener(this);
@@ -263,6 +301,7 @@ private:
     Controller* owner_ = nullptr;
     VSTGUI::CTextLabel* statusLabel_ = nullptr;
     VSTGUI::CView* codeEditorView_ = nullptr;
+    VSTGUI::SharedPointer<VSTGUI::CVSTGUITimer> statusTimer_;
 };
 
 } // namespace
@@ -319,6 +358,36 @@ bool Controller::sendStopAll() {
     if (!message) return false;
     message->setMessageID("SonicPi.StopAll");
     return sendMessage(message) == Steinberg::kResultOk;
+}
+
+bool Controller::requestRuntimeStatus() {
+    auto message = Steinberg::owned(allocateMessage());
+    if (!message) return false;
+    message->setMessageID("SonicPi.GetStatus");
+    return sendMessage(message) == Steinberg::kResultOk;
+}
+
+RuntimeStatus Controller::runtimeStatus() const noexcept {
+    return runtimeStatus_.load();
+}
+
+Steinberg::tresult PLUGIN_API Controller::notify(
+    Steinberg::Vst::IMessage* message) {
+    if (!message) return Steinberg::kResultFalse;
+    const auto* messageId = message->getMessageID();
+    if (messageId && std::strcmp(messageId, "SonicPi.RuntimeStatus") == 0) {
+        auto* attributes = message->getAttributes();
+        Steinberg::int64 state = static_cast<Steinberg::int64>(
+            RuntimeStatus::inactive);
+        if (attributes &&
+            attributes->getInt("state", state) == Steinberg::kResultOk &&
+            state >= static_cast<Steinberg::int64>(RuntimeStatus::inactive) &&
+            state <= static_cast<Steinberg::int64>(RuntimeStatus::error)) {
+            runtimeStatus_.store(static_cast<RuntimeStatus>(state));
+        }
+        return Steinberg::kResultOk;
+    }
+    return EditController::notify(message);
 }
 
 void Controller::onTextEditorCreated(const VSTGUI::ITextEditor& editor) {
