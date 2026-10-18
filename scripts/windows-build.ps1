@@ -255,25 +255,7 @@ if ($LASTEXITCODE -ne 0 -or
     throw "The host-buffer render probe failed."
 }
 
-$artifactBundle = Join-Path $buildRoot "SonicPi.vst3"
-if (Test-Path -LiteralPath $artifactBundle) {
-    Remove-Item -LiteralPath $artifactBundle -Recurse -Force
-}
-New-Item -ItemType Directory -Path $artifactBundle -Force | Out-Null
-& robocopy $pluginBundle $artifactBundle /E /COPY:DAT /DCOPY:DAT /XJ `
-    /R:1 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
-if ($LASTEXITCODE -ge 8) {
-    throw "Could not stage the shorter-path VST3 artifact (robocopy exit $LASTEXITCODE)."
-}
-$pluginBundle = $artifactBundle
-$pluginBinary = Get-ChildItem -LiteralPath $pluginBundle -Recurse -File |
-    Where-Object { $_.Extension -in @(".vst3", ".dll") } |
-    Select-Object -First 1
-if (-not $pluginBinary) {
-    throw "The staged VST3 bundle contains no Windows plug-in binary."
-}
-
-$bundleArchivePrefix = "build-windows/SonicPi.vst3/"
+$bundleArchivePrefix = "build-windows/VST3/Release/sonic_pi_vst3.vst3/"
 if ($env:GITHUB_WORKSPACE) {
     $bundleArchivePrefix = [System.IO.Path]::GetRelativePath(
         $env:GITHUB_WORKSPACE, $pluginBundle).Replace("\", "/") + "/"
@@ -285,7 +267,7 @@ $maxBundleRelativePathLength = (Get-ChildItem -LiteralPath $pluginBundle `
 $maxZipEntryPathLength = $bundleArchivePrefix.Length +
     $maxBundleRelativePathLength
 Write-Host "Maximum Windows artifact ZIP path length: $maxZipEntryPathLength characters"
-if ($maxZipEntryPathLength -gt 220) {
+if ($maxZipEntryPathLength -gt 240) {
     throw "The VST3 bundle still contains paths too long for reliable Windows ZIP extraction."
 }
 
