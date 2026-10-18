@@ -161,16 +161,24 @@ std::wstring quoteWindowsArgument(const std::wstring& argument) {
 
 std::vector<wchar_t> childEnvironmentBlock(
     const std::filesystem::path& root,
-    const std::filesystem::path& userHome) {
+    const std::filesystem::path& userHome,
+    const std::filesystem::path& rubyBin) {
     std::vector<std::wstring> entries;
     LPWCH source = GetEnvironmentStringsW();
     if (!source) return {};
+    bool replacedPath = false;
     for (const wchar_t* current = source; *current;) {
         std::wstring entry(current);
         current += entry.size() + 1;
         if (_wcsnicmp(entry.c_str(), L"SONIC_PI_ROOT=", 14) == 0 ||
             _wcsnicmp(entry.c_str(), L"SONIC_PI_ETC_PATH=", 18) == 0 ||
             _wcsnicmp(entry.c_str(), L"SONIC_PI_HOME=", 14) == 0) {
+            continue;
+        }
+        if (!rubyBin.empty() && _wcsnicmp(entry.c_str(), L"PATH=", 5) == 0) {
+            entries.push_back(L"PATH=" + rubyBin.native() + L";" +
+                              entry.substr(5));
+            replacedPath = true;
             continue;
         }
         entries.push_back(std::move(entry));
@@ -180,6 +188,9 @@ std::vector<wchar_t> childEnvironmentBlock(
     entries.push_back(L"SONIC_PI_ROOT=" + root.native());
     entries.push_back(L"SONIC_PI_ETC_PATH=" + (root / L"etc").native());
     entries.push_back(L"SONIC_PI_HOME=" + userHome.native());
+    if (!rubyBin.empty() && !replacedPath) {
+        entries.push_back(L"PATH=" + rubyBin.native());
+    }
     std::sort(entries.begin(), entries.end(),
               [](const std::wstring& left, const std::wstring& right) {
                   return _wcsicmp(left.c_str(), right.c_str()) < 0;
@@ -194,13 +205,72 @@ std::vector<wchar_t> childEnvironmentBlock(
     if (entries.empty()) block.push_back(L'\0');
     return block;
 }
+
+int runtimeModuleAnchor = 0;
+
+std::filesystem::path currentModulePath() {
+    HMODULE module = nullptr;
+    const auto address = reinterpret_cast<LPCWSTR>(&runtimeModuleAnchor);
+    if (!GetModuleHandleExW(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            address, &module)) {
+        return {};
+    }
+
+    std::vector<wchar_t> buffer(32768);
+    const DWORD length = GetModuleFileNameW(
+        module, buffer.data(), static_cast<DWORD>(buffer.size()));
+    if (length == 0 || length >= buffer.size()) return {};
+    return std::filesystem::path(std::wstring(buffer.data(), length));
+}
+
+std::filesystem::path configuredRuntimeRoot() {
+    const DWORD required =
+        GetEnvironmentVariableW(L"SONIC_PI_VST_RUNTIME_ROOT", nullptr, 0);
+    if (required <= 1) return {};
+    std::vector<wchar_t> value(required);
+    const DWORD length = GetEnvironmentVariableW(
+        L"SONIC_PI_VST_RUNTIME_ROOT", value.data(), required);
+    if (length == 0 || length >= required) return {};
+    return std::filesystem::path(value.data());
+}
+
+std::filesystem::path bundledRuntimeRoot(
+    const std::filesystem::path& modulePath) {
+    if (modulePath.empty()) return {};
+    const auto contentsDirectory = modulePath.parent_path().parent_path();
+    return contentsDirectory / L"Resources" / L"SonicPiVstRuntime";
+}
+
+bool hasBundledRuntime(const std::filesystem::path& runtimeRoot) {
+    return std::filesystem::is_regular_file(
+               runtimeRoot / L"sonic-pi" / L"app" / L"server" / L"ruby" /
+               L"bin" / L"spider-server.rb") &&
+           std::filesystem::is_regular_file(
+               runtimeRoot / L"ruby" / L"bin" / L"ruby.exe");
+}
+
+bool isVstModule(const std::filesystem::path& modulePath) {
+    const auto extension = modulePath.extension().wstring();
+    return _wcsicmp(extension.c_str(), L".vst3") == 0;
+}
+
+bool buildTreeRuntimeIsEnabled() {
+    wchar_t value[2]{};
+    return GetEnvironmentVariableW(
+               L"SONIC_PI_VST_ALLOW_BUILD_TREE_RUNTIME", value, 2) == 1 &&
+           value[0] == L'1';
+}
 #endif
 
 } // namespace
 
 struct SonicPiLiveRuntime::Impl {
     ClockworkTcpOscBridge bridge;
-    std::filesystem::path root = SONIC_PI_ROOT_DIRECTORY;
+    std::filesystem::path root;
+    std::filesystem::path runtimeBundleRoot;
+    std::filesystem::path rubyExecutable;
     std::filesystem::path userHome;
     std::filesystem::path logPath;
     std::uint16_t controlPort = 0;
@@ -223,6 +293,56 @@ struct SonicPiLiveRuntime::Impl {
         return errorText;
     }
 
+    bool configureRuntimePaths() {
+#if defined(_WIN32)
+        const auto configuredRoot = configuredRuntimeRoot();
+        if (!configuredRoot.empty()) {
+            if (!hasBundledRuntime(configuredRoot)) {
+                setError("The configured Sonic Pi VST runtime is incomplete: " +
+                         configuredRoot.string());
+                return false;
+            }
+            runtimeBundleRoot = configuredRoot;
+        } else {
+            const auto modulePath = currentModulePath();
+            const auto bundledRoot = bundledRuntimeRoot(modulePath);
+            if (hasBundledRuntime(bundledRoot)) {
+                runtimeBundleRoot = bundledRoot;
+            } else if (isVstModule(modulePath) &&
+                       !buildTreeRuntimeIsEnabled()) {
+                setError("The Sonic Pi VST runtime is missing from the plug-in "
+                         "bundle. Reinstall the complete Windows package.");
+                return false;
+            } else {
+                // Executable probes and local development builds use the
+                // source tree fetched by CMake. A VST module never falls back
+                // to this machine-specific build path.
+                root = SONIC_PI_ROOT_DIRECTORY;
+            }
+        }
+
+        if (!runtimeBundleRoot.empty()) {
+            root = runtimeBundleRoot / L"sonic-pi";
+            rubyExecutable = runtimeBundleRoot / L"ruby" / L"bin" / L"ruby.exe";
+        }
+#else
+        root = SONIC_PI_ROOT_DIRECTORY;
+#endif
+        const auto spiderServer = root / "app/server/ruby/bin/spider-server.rb";
+        if (!std::filesystem::is_regular_file(spiderServer)) {
+            setError("Sonic Pi Ruby server is missing from the selected runtime tree");
+            return false;
+        }
+#if defined(_WIN32)
+        if (!rubyExecutable.empty() &&
+            !std::filesystem::is_regular_file(rubyExecutable)) {
+            setError("Bundled ruby.exe is missing from the Sonic Pi VST runtime");
+            return false;
+        }
+#endif
+        return true;
+    }
+
 #if defined(_WIN32)
     HANDLE workerProcess = nullptr;
 #else
@@ -233,11 +353,8 @@ struct SonicPiLiveRuntime::Impl {
         if (isReady.load() || monitorRunning.load()) return true;
         startupFailed.store(false);
         setError({});
+        if (!configureRuntimePaths()) return false;
         const auto spiderServer = root / "app/server/ruby/bin/spider-server.rb";
-        if (!std::filesystem::is_regular_file(spiderServer)) {
-            setError("Sonic Pi Ruby server is missing from the fetched source tree");
-            return false;
-        }
 
 #if defined(_WIN32)
         if (!SocketPlatform::initialize()) {
@@ -297,7 +414,7 @@ struct SonicPiLiveRuntime::Impl {
             return std::wstring(number.begin(), number.end());
         };
         const std::vector<std::wstring> arguments{
-            L"ruby.exe",
+            rubyExecutable.empty() ? L"ruby.exe" : rubyExecutable.native(),
             L"--disable=gems",
             spiderServer.native(),
             L"-u",
@@ -313,7 +430,10 @@ struct SonicPiLiveRuntime::Impl {
             if (!commandLine.empty()) commandLine.push_back(L' ');
             commandLine += quoteWindowsArgument(argument);
         }
-        auto environment = childEnvironmentBlock(root, userHome);
+        auto environment = childEnvironmentBlock(
+            root, userHome,
+            rubyExecutable.empty() ? std::filesystem::path{}
+                                  : rubyExecutable.parent_path());
         if (environment.empty()) {
             setError("Could not copy the Windows environment for Ruby");
             return false;
@@ -346,7 +466,8 @@ struct SonicPiLiveRuntime::Impl {
         startup.hStdError = logHandle;
         PROCESS_INFORMATION process{};
         const BOOL created = CreateProcessW(
-            nullptr, commandLine.data(), nullptr, nullptr, TRUE,
+            rubyExecutable.empty() ? nullptr : rubyExecutable.c_str(),
+            commandLine.data(), nullptr, nullptr, TRUE,
             CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT,
             environment.data(), root.c_str(), &startup, &process);
         const DWORD createError = created ? ERROR_SUCCESS : GetLastError();

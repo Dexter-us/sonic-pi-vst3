@@ -19,17 +19,19 @@ the Sonic Pi language runtime.
 - The embedded engine is process-global and the prototype allows only one
   active plug-in instance per host process.
 - The Linux build has been verified with the VST3 SDK validator and command-line
-  audio probes, but not in a DAW. A Windows runtime path using Winsock and
-  `CreateProcess` has been added; it still needs a native Windows build and DAW
-  test.
+  audio probes, but not in a DAW. The Windows package stages Sonic Pi source/assets
+  and a Ruby runtime inside the VST3 bundle; it still needs a native Windows build
+  and real DAW test.
 
 ## Build and run
 
 Requires CMake 3.25+, a C++20 compiler, Rust/Cargo, Git, and network access for
 the first configure/build. The build fetches pinned SuperSonic v0.91.0 and
 Steinberg VST3 SDK v3.8.1, including their required submodules. Ruby 3.2 must be
-available on `PATH` to launch the bundled Sonic Pi runtime. Windows builds use
-the Visual Studio 2022 x64 generator and have not yet been verified here.
+available on `PATH` when building and validating the runtime. Windows builds use
+the Visual Studio 2022 x64 generator; the build script copies Ruby and the fetched
+Sonic Pi source/assets into the VST3 bundle, so an installed plug-in does not use
+the build machine's Ruby or source checkout.
 
 ```sh
 cmake -S . \
@@ -57,7 +59,10 @@ powershell -ExecutionPolicy Bypass `
   -File .\scripts\windows-build.ps1
 ```
 
-The GitHub Actions workflow is not yet included in this repository. Once it is added under `.github/workflows`, it can build and upload the `.vst3` bundle.
+The GitHub Actions workflow builds and validates the Windows package, then uploads
+the self-contained `.vst3` bundle as a downloadable artifact. The runtime is stored
+at `Contents/Resources/SonicPiVstRuntime`; its `README.txt` lists the bundled
+versions, and the upstream license notices are included with the source files.
 
 ## Licensing note
 
