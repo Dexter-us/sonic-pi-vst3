@@ -23,7 +23,7 @@ Dexter U.S., and the editor header carries the same branding.
   probes, but the plug-in still needs a real DAW installation and live-use test.
   Its bundle contains Sonic Pi source/assets and a trimmed Ruby runtime. The
   package excludes Ruby build tools, headers, documentation, test payloads, and
-  caches while retaining the interpreter, libraries, gems, and required DLLs.
+  caches while retaining the interpreter, libraries, gems, and required DLLs. It also bundles a third-party notice summary and collected upstream license/copyright files.
 
 ## Build and run
 
@@ -66,12 +66,18 @@ powershell -ExecutionPolicy Bypass `
 The GitHub Actions workflow builds and validates the Windows package, then uploads
 the self-contained `.vst3` bundle as a downloadable artifact. The runtime is stored
 at `Contents/Resources/SonicPiVstRuntime`; its `README.txt` lists the bundled
-versions, and the upstream license notices are included with the source files.
+versions, `THIRD_PARTY_NOTICES.txt` summarizes included components, and
+`Licenses/FILE_INDEX.txt` maps collected upstream legal notices to their
+original locations.
 
 ## Licensing note
 
-The plug-in links SuperSonic's GPL-3.0-or-later scsynth engine and Clockwork's
-AGPL-3.0-or-later substrate (Clockwork also offers a commercial license). The
-Steinberg VST3 SDK is MIT-licensed. Sonic Pi runtime files and synth definitions
-carry upstream license terms. Review all applicable licenses before
-distributing a combined plug-in; this prototype is not legal advice.
+The wrapper source files use SPDX `GPL-3.0-or-later` identifiers; no separate
+copyright holder is claimed for the AI-generated wrapper code. The plug-in
+includes SuperSonic v0.91.0, whose combined program is identified upstream as
+`AGPL-3.0-or-later`, plus Sonic Pi v5.0.0 files with component-specific terms.
+The VST3 SDK is MIT-licensed, while VSTGUI and its third-party components have
+their own notices. See `THIRD_PARTY_NOTICES.txt` and the bundled
+`Licenses/FILE_INDEX.txt`. The build collects notices from the pinned source
+trees and bundled Ruby/MSYS2 runtime, but this is not a legal compliance
+certification; review all applicable terms before distribution.

@@ -2,6 +2,7 @@
 #include "sonic_pi_controller.h"
 
 #include "pluginterfaces/vst/ivstmessage.h"
+#include "vstgui/uidescription/uiattributes.h"
 
 #include <cstring>
 #include <string>
@@ -28,6 +29,17 @@ public:
 
     ~LiveCodeSubController() override {
         detach(statusLabel_);
+    }
+
+    VSTGUI::CView* createView(
+        const VSTGUI::UIAttributes& attributes,
+        const VSTGUI::IUIDescription*) override {
+        const auto* customViewName =
+            attributes.getAttributeValue(VSTGUI::IUIDescription::kCustomViewName);
+        if (customViewName && *customViewName == "SonicPiTextEditor") {
+            return VSTGUI::createNewTextEditor(VSTGUI::CRect(), owner_);
+        }
+        return nullptr;
     }
 
     void valueChanged(VSTGUI::CControl*) override {}

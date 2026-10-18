@@ -1,0 +1,59 @@
+Dexter U.S. Sonic Pi VST3 — third-party notices
+
+This instrument combines original VST3 wrapper code with upstream software and
+runtime assets. Keep this notice and the upstream files in the Licenses
+directory with any redistribution of the Windows VST3 bundle.
+
+Original VST3 wrapper
+---------------------
+The VST3 wrapper source files use the SPDX license identifier
+GPL-3.0-or-later. This notice does not claim a separate copyright holder for
+that wrapper code. The Dexter U.S. name identifies the product branding and is
+not a claim to upstream copyrights.
+GPLv3 license text: https://www.gnu.org/licenses/gpl-3.0.txt
+
+SuperSonic and Clockwork
+------------------------
+The build uses SuperSonic v0.91.0, including its Clockwork submodule and
+scsynth engine. SuperSonic identifies the combined program under
+AGPL-3.0-or-later; individual components may retain additional or different
+terms. Clockwork also offers a commercial license. See the collected source
+licenses in Licenses/SuperSonic and the original-path mapping in
+Licenses/FILE_INDEX.txt.
+AGPLv3 license text: https://www.gnu.org/licenses/agpl-3.0.txt
+
+Sonic Pi
+--------
+The embedded Sonic Pi runtime is from v5.0.0. Its source, synth definitions,
+samples, and other assets have mixed upstream terms, including MIT, CC0,
+GPL, EPL, and other licenses. Documentation, tutorials, examples, and snippets
+not used by this VST are excluded from the Windows runtime bundle. Review the
+upstream LICENSE.md and the collected files in Licenses/SonicPiRuntime.
+
+Steinberg VST3 SDK and VSTGUI
+-----------------------------
+The build uses Steinberg VST3 SDK v3.8.1_build_84. Its top-level SDK license
+is MIT; VSTGUI and included third-party components carry their own terms.
+Their upstream license and notice files are collected in Licenses/VST3SDK.
+
+Ruby and Windows runtime dependencies
+-------------------------------------
+The bundle includes the Ruby 3.2 runtime and required RubyInstaller/MSYS2 DLLs.
+Their license, copyright, author, and notice files are collected from the
+runtime installation and MSYS2 license directories in Licenses/RubyRuntime and
+Licenses/MSYS2-*.
+
+The build-generated Licenses/FILE_INDEX.txt maps every collected file to its
+original path in the corresponding upstream source or runtime tree. Full
+upstream notices govern their respective components; this summary does not
+replace them or grant additional rights. The collection is intended to keep
+notices with the binary, not to certify legal compliance. In particular,
+review AGPL obligations and Sonic Pi's component-specific terms before
+distribution.
+
+Upstream source references
+--------------------------
+Sonic Pi: https://github.com/sonic-pi-net/sonic-pi/tree/v5.0.0
+SuperSonic: https://github.com/samaaron/supersonic/tree/v0.91.0
+VST3 SDK: https://github.com/steinbergmedia/vst3sdk/tree/v3.8.1_build_84
+RubyInstaller: https://github.com/oneclick/rubyinstaller2

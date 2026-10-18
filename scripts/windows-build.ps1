@@ -57,6 +57,8 @@ if (-not $pluginBinary) {
 $runtimeRoot = Join-Path $pluginBundle "Contents\Resources\SonicPiVstRuntime"
 $sonicPiRoot = Join-Path $runtimeRoot "sonic-pi"
 $sonicPiSourceRoot = Join-Path $buildRoot "_deps\sonic_pi_runtime-src"
+$licenseRoot = Join-Path $runtimeRoot "Licenses"
+$licenseIndex = Join-Path $licenseRoot "FILE_INDEX.txt"
 foreach ($requiredSourceFile in @("LICENSE.md", "VERSION")) {
     if (-not (Test-Path -LiteralPath (Join-Path $sonicPiSourceRoot $requiredSourceFile) -PathType Leaf)) {
         throw "The fetched Sonic Pi source tree is missing $requiredSourceFile."
@@ -82,6 +84,52 @@ function Copy-RuntimeTree {
     }
 }
 
+if (Test-Path -LiteralPath $licenseRoot) {
+    Remove-Item -LiteralPath $licenseRoot -Recurse -Force
+}
+New-Item -ItemType Directory -Path $licenseRoot -Force | Out-Null
+Set-Content -LiteralPath $licenseIndex -Value @(
+    "Original upstream path => bundled path"
+    "======================================="
+) -Encoding utf8
+
+function Copy-LicenseFiles {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourceRoot,
+        [Parameter(Mandatory = $true)][string]$Component
+    )
+    if (-not (Test-Path -LiteralPath $SourceRoot -PathType Container)) {
+        throw "A required source tree for license collection is missing: $SourceRoot"
+    }
+
+    $noticeNamePattern = '^(?i)(license|licence|copying|copyright|notice|patents|unlicense|authors|contributors|attribution|credits|third[-_. ]party[-_. ]notices?|bsdl|legal)(?:$|[._-].*)'
+    $files = Get-ChildItem -LiteralPath $SourceRoot -File -Recurse -Force |
+        Where-Object {
+            $_.FullName -notmatch '[\\/]\.git([\\/]|$)' -and
+            $_.Name -match $noticeNamePattern
+        } |
+        Sort-Object FullName
+    if (-not $files) {
+        throw "No license or copyright notice files were found under $SourceRoot."
+    }
+
+    $componentRoot = Join-Path $licenseRoot $Component
+    New-Item -ItemType Directory -Path $componentRoot -Force | Out-Null
+    $index = 0
+    foreach ($file in $files) {
+        $index++
+        $relativeSourcePath = [System.IO.Path]::GetRelativePath(
+            $SourceRoot, $file.FullName).Replace("\", "/")
+        $bundledFileName = "{0:D4}-{1}" -f $index, $file.Name
+        Copy-Item -LiteralPath $file.FullName `
+            -Destination (Join-Path $componentRoot $bundledFileName) -Force
+        Add-Content -LiteralPath $licenseIndex `
+            -Value "$Component/$relativeSourcePath -> $Component/$bundledFileName" `
+            -Encoding utf8
+    }
+    Write-Host "Collected $index license/notice files for $Component."
+}
+
 Copy-RuntimeTree `
     (Join-Path $sonicPiSourceRoot "app\server\ruby") `
     (Join-Path $sonicPiRoot "app\server\ruby")
@@ -95,6 +143,28 @@ Copy-Item -LiteralPath (Join-Path $sonicPiSourceRoot "LICENSE.md") `
     -Destination (Join-Path $sonicPiRoot "LICENSE.md") -Force
 Copy-Item -LiteralPath (Join-Path $sonicPiSourceRoot "VERSION") `
     -Destination (Join-Path $sonicPiRoot "VERSION") -Force
+
+# These documentation and example trees are not used by the VST runtime and
+# have separate upstream attribution terms. Keep the actual runtime assets.
+foreach ($relativePath in @(
+    "etc\doc",
+    "etc\examples",
+    "etc\snippets",
+    "etc\quickstart",
+    "etc\www"
+)) {
+    $optionalContentPath = Join-Path $sonicPiRoot $relativePath
+    if (Test-Path -LiteralPath $optionalContentPath) {
+        Remove-Item -LiteralPath $optionalContentPath -Recurse -Force
+    }
+}
+
+# Capture notices before removing vendor test and documentation payloads below.
+Copy-LicenseFiles -SourceRoot $sonicPiRoot -Component "SonicPiRuntime"
+$superSonicSourceRoot = Join-Path $buildRoot "_deps\supersonic-src"
+$vst3SdkSourceRoot = Join-Path $buildRoot "_deps\vst3sdk-src"
+Copy-LicenseFiles -SourceRoot $superSonicSourceRoot -Component "SuperSonic"
+Copy-LicenseFiles -SourceRoot $vst3SdkSourceRoot -Component "VST3SDK"
 
 # Vendored Ruby dependencies carry upstream test fixtures that are not used by
 # the live server. Some fixture paths exceed Windows Explorer's ZIP path limit.
@@ -152,6 +222,25 @@ foreach ($relativeBinPath in @("msys64\ucrt64\bin", "msys64\usr\bin")) {
         Copy-Item -LiteralPath $dll.FullName `
             -Destination (Join-Path $destinationBin $dll.Name) -Force
     }
+}
+
+# Preserve Ruby's own legal files and the package notices for the MSYS2 DLLs
+# staged above. The full MSYS2 toolchain is not shipped with the instrument.
+Copy-LicenseFiles -SourceRoot $rubyBundleRoot -Component "RubyRuntime"
+$msys2Root = Join-Path $rubyInstallRoot "msys64"
+$msys2LicenseRoots = @(
+    (Join-Path $msys2Root "usr\share\licenses"),
+    (Join-Path $msys2Root "ucrt64\share\licenses"),
+    (Join-Path $msys2Root "mingw64\share\licenses")
+) | Where-Object { Test-Path -LiteralPath $_ -PathType Container }
+if (-not $msys2LicenseRoots) {
+    throw "MSYS2 license directories were not found for the Ruby runtime DLLs."
+}
+$msys2LicenseRootIndex = 0
+foreach ($msys2LicenseRoot in $msys2LicenseRoots) {
+    $msys2LicenseRootIndex++
+    Copy-LicenseFiles -SourceRoot $msys2LicenseRoot `
+        -Component ("MSYS2-{0:D2}" -f $msys2LicenseRootIndex)
 }
 
 $rubyBytesBeforePrune = (Get-ChildItem -LiteralPath $rubyBundleRoot -Recurse -File |
@@ -218,16 +307,21 @@ Self-contained Sonic Pi runtime for the Sonic Pi VST3 prototype.
 Sonic Pi source: v5.0.0
 Ruby: $($bundledRubyInfo -join " ")
 
-The sonic-pi directory contains the upstream Sonic Pi runtime source, assets,
-and license, with vendored test and documentation directories removed. The ruby
-directory contains Ruby runtime files and required DLLs;
+The sonic-pi directory contains the upstream Sonic Pi runtime source and runtime
+assets. Tutorials, examples, snippets, and documentation not used by the VST are
+excluded. The ruby directory contains Ruby runtime files and required DLLs;
 MSYS2 build tools, headers, documentation, test payloads, and package caches
 are excluded while the interpreter, standard libraries, gems, and extensions
 are retained.
-See the included upstream license files before redistribution.
+THIRD_PARTY_NOTICES.txt summarizes the bundled components. Licenses contains
+the collected upstream license and copyright files; FILE_INDEX.txt maps each
+bundled file to its original location. Review all applicable terms before
+redistribution.
 "@
 Set-Content -LiteralPath (Join-Path $runtimeRoot "README.txt") `
     -Value $runtimeManifest -Encoding utf8
+Copy-Item -LiteralPath (Join-Path $projectRoot "THIRD_PARTY_NOTICES.txt") `
+    -Destination (Join-Path $runtimeRoot "THIRD_PARTY_NOTICES.txt") -Force
 
 $liveProbe = Join-Path $buildRoot "Release\sonic_pi_live_probe.exe"
 if (-not (Test-Path -LiteralPath $liveProbe -PathType Leaf)) {
