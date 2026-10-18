@@ -96,6 +96,23 @@ Copy-Item -LiteralPath (Join-Path $sonicPiSourceRoot "LICENSE.md") `
 Copy-Item -LiteralPath (Join-Path $sonicPiSourceRoot "VERSION") `
     -Destination (Join-Path $sonicPiRoot "VERSION") -Force
 
+# Vendored Ruby dependencies carry upstream test fixtures that are not used by
+# the live server. Some fixture paths exceed Windows Explorer's ZIP path limit.
+$sonicPiRubyVendorRoot = Join-Path $sonicPiRoot "app\server\ruby\vendor"
+if (Test-Path -LiteralPath $sonicPiRubyVendorRoot -PathType Container) {
+    $nonRuntimeSourceDirectories = @("test", "tests", "spec", "specs",
+        "doc", "docs", "example", "examples", "benchmark", "benchmarks")
+    $sourceDirectoriesToPrune = Get-ChildItem `
+        -LiteralPath $sonicPiRubyVendorRoot -Directory -Recurse |
+        Where-Object { $_.Name -in $nonRuntimeSourceDirectories } |
+        Sort-Object { $_.FullName.Length } -Descending
+    $prunedSourceDirectoryCount = @($sourceDirectoriesToPrune).Count
+    foreach ($directory in $sourceDirectoriesToPrune) {
+        Remove-Item -LiteralPath $directory.FullName -Recurse -Force
+    }
+    Write-Host "Removed $prunedSourceDirectoryCount non-runtime vendored Ruby directories."
+}
+
 $rubyCommand = Get-Command ruby.exe -ErrorAction Stop
 $rubyExecutable = $rubyCommand.Source
 $rubyInstallRoot = Split-Path (Split-Path $rubyExecutable -Parent) -Parent
@@ -202,7 +219,8 @@ Sonic Pi source: v5.0.0
 Ruby: $($bundledRubyInfo -join " ")
 
 The sonic-pi directory contains the upstream Sonic Pi runtime source, assets,
-and license. The ruby directory contains Ruby runtime files and required DLLs;
+and license, with vendored test and documentation directories removed. The ruby
+directory contains Ruby runtime files and required DLLs;
 MSYS2 build tools, headers, documentation, test payloads, and package caches
 are excluded while the interpreter, standard libraries, gems, and extensions
 are retained.
@@ -235,6 +253,40 @@ $renderPath = Join-Path $tempDirectory "sonic-pi-windows-render-probe.wav"
 if ($LASTEXITCODE -ne 0 -or
     -not (Test-Path -LiteralPath $renderPath -PathType Leaf)) {
     throw "The host-buffer render probe failed."
+}
+
+$artifactBundle = Join-Path $buildRoot "SonicPi.vst3"
+if (Test-Path -LiteralPath $artifactBundle) {
+    Remove-Item -LiteralPath $artifactBundle -Recurse -Force
+}
+New-Item -ItemType Directory -Path $artifactBundle -Force | Out-Null
+& robocopy $pluginBundle $artifactBundle /E /COPY:DAT /DCOPY:DAT /XJ `
+    /R:1 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+if ($LASTEXITCODE -ge 8) {
+    throw "Could not stage the shorter-path VST3 artifact (robocopy exit $LASTEXITCODE)."
+}
+$pluginBundle = $artifactBundle
+$pluginBinary = Get-ChildItem -LiteralPath $pluginBundle -Recurse -File |
+    Where-Object { $_.Extension -in @(".vst3", ".dll") } |
+    Select-Object -First 1
+if (-not $pluginBinary) {
+    throw "The staged VST3 bundle contains no Windows plug-in binary."
+}
+
+$bundleArchivePrefix = "build-windows/SonicPi.vst3/"
+if ($env:GITHUB_WORKSPACE) {
+    $bundleArchivePrefix = [System.IO.Path]::GetRelativePath(
+        $env:GITHUB_WORKSPACE, $pluginBundle).Replace("\", "/") + "/"
+}
+$maxBundleRelativePathLength = (Get-ChildItem -LiteralPath $pluginBundle `
+    -Recurse -File | ForEach-Object {
+        $_.FullName.Substring($pluginBundle.Length + 1).Replace("\", "/").Length
+    } | Measure-Object -Maximum).Maximum
+$maxZipEntryPathLength = $bundleArchivePrefix.Length +
+    $maxBundleRelativePathLength
+Write-Host "Maximum Windows artifact ZIP path length: $maxZipEntryPathLength characters"
+if ($maxZipEntryPathLength -gt 220) {
+    throw "The VST3 bundle still contains paths too long for reliable Windows ZIP extraction."
 }
 
 $bundleSizeMb = [math]::Round(
