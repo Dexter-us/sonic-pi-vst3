@@ -9,9 +9,9 @@ using namespace Steinberg;
 using namespace Steinberg::Vst;
 
 BEGIN_FACTORY_DEF(
-    "Independent Audio Prototype",
-    "https://example.org",
-    "prototype@example.org")
+    "Dexter U.S.",
+    "https://github.com/Dexter-us/sonic-pi-vst3",
+    "")
 
 DEF_CLASS2(
     INLINE_UID_FROM_FUID(SonicPiVst3::kProcessorClassId),
@@ -28,7 +28,7 @@ DEF_CLASS2(
     INLINE_UID_FROM_FUID(SonicPiVst3::kControllerClassId),
     PClassInfo::kManyInstances,
     kVstComponentControllerClass,
-    "Sonic Pi Audio Prototype Controller",
+    "Dexter U.S. Sonic Pi Controller",
     0,
     "",
     "0.1.0",

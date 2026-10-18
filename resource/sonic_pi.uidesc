@@ -20,15 +20,15 @@
             origin="0, 0" size="720, 500" minSize="720, 500" maxSize="720, 500"
             transparent="false" mouse-enabled="true">
     <view back-color="Panel" class="CTextLabel" font="~ NormalFontBig"
-          font-antialias="true" font-color="Text" frame-color="Panel"
-          frame-width="0" origin="26, 20" size="300, 28"
-          text-alignment="left" title="Sonic Pi  /  Live Code"
-          transparent="true"/>
+          font-antialias="true" font-color="Text" frame-color="Border"
+          frame-width="1" origin="18, 12" size="684, 42"
+          text-alignment="left" title="Dexter U.S. Sonic Pi"
+          transparent="false"/>
     <view back-color="Panel" class="CTextLabel" font="~ NormalFont"
           font-antialias="true" font-color="Muted" frame-color="Panel"
-          frame-width="0" origin="27, 53" size="650, 20"
+          frame-width="0" origin="27, 61" size="650, 20"
           text-alignment="left"
-          title="Runs Sonic Pi's Ruby live-coding runtime. Host MIDI is not connected."
+          title="Sonic Pi live-coding instrument  /  Audio output"
           transparent="true"/>
     <view class="CViewContainer" sub-controller="LiveCodeController"
           origin="24, 88" size="672, 390" transparent="true"

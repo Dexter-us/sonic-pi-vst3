@@ -107,8 +107,35 @@ if (Test-Path -LiteralPath $rubyBundleRoot) {
     Remove-Item -LiteralPath $rubyBundleRoot -Recurse -Force
 }
 New-Item -ItemType Directory -Path $rubyBundleRoot -Force | Out-Null
-Copy-Item -Path (Join-Path $rubyInstallRoot "*") `
-    -Destination $rubyBundleRoot -Recurse -Force
+$excludedRubyDirectories = @(
+    (Join-Path $rubyInstallRoot "msys64"),
+    (Join-Path $rubyInstallRoot "include")
+)
+& robocopy $rubyInstallRoot $rubyBundleRoot /E /COPY:DAT /DCOPY:DAT /XJ `
+    /XD $excludedRubyDirectories /R:1 /W:1 /NFL /NDL /NJH /NJS /NP | Out-Null
+if ($LASTEXITCODE -ge 8) {
+    throw "Could not stage the Ruby runtime files (robocopy exit $LASTEXITCODE)."
+}
+
+# RubyInstaller's MSYS2 directories include compilers and headers that the
+# runtime does not need. Keep only their DLLs, which the live probe verifies
+# with the system PATH removed.
+foreach ($relativeBinPath in @("msys64\ucrt64\bin", "msys64\usr\bin")) {
+    $sourceBin = Join-Path $rubyInstallRoot $relativeBinPath
+    if (-not (Test-Path -LiteralPath $sourceBin -PathType Container)) {
+        throw "A required Ruby runtime DLL directory is missing: $sourceBin"
+    }
+    $destinationBin = Join-Path $rubyBundleRoot $relativeBinPath
+    New-Item -ItemType Directory -Path $destinationBin -Force | Out-Null
+    $runtimeDlls = Get-ChildItem -LiteralPath $sourceBin -Filter "*.dll" -File
+    if (-not $runtimeDlls) {
+        throw "No runtime DLLs were found in $sourceBin."
+    }
+    foreach ($dll in $runtimeDlls) {
+        Copy-Item -LiteralPath $dll.FullName `
+            -Destination (Join-Path $destinationBin $dll.Name) -Force
+    }
+}
 $bundledRuby = Join-Path $rubyBundleRoot "bin\ruby.exe"
 if (-not (Test-Path -LiteralPath $bundledRuby -PathType Leaf)) {
     throw "Ruby 3.2 was not copied into the VST3 bundle."
@@ -124,7 +151,8 @@ Sonic Pi source: v5.0.0
 Ruby: $($bundledRubyInfo -join " ")
 
 The sonic-pi directory contains the upstream Sonic Pi runtime source, assets,
-and license. The ruby directory contains the Ruby installation used by the plug-in.
+and license. The ruby directory contains Ruby runtime files and required DLLs;
+MSYS2 build tools and headers are excluded.
 See the included upstream license files before redistribution.
 "@
 Set-Content -LiteralPath (Join-Path $runtimeRoot "README.txt") `

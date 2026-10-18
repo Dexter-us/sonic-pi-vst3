@@ -1,10 +1,11 @@
-# Sonic Pi VST3 live-coding prototype
+# Dexter U.S. Sonic Pi VST3 live-coding instrument
 
 This prototype combines the upstream Sonic Pi Ruby runtime with the
 SuperSonic/scsynth engine in a loadable VST3. Its VSTGUI editor contains a
 multi-line Sonic Pi code editor and Run/Stop controls. The audio callback
 renders directly into the host's stereo output buffers; a separate worker runs
-the Sonic Pi language runtime.
+the Sonic Pi language runtime. It is registered as an Instrument/Synth by
+Dexter U.S., and the editor header carries the same branding.
 
 ## Scope and current limitations
 
@@ -18,10 +19,10 @@ the Sonic Pi language runtime.
   used; audio is delivered through the host's output buffers.
 - The embedded engine is process-global and the prototype allows only one
   active plug-in instance per host process.
-- The Linux build has been verified with the VST3 SDK validator and command-line
-  audio probes, but not in a DAW. The Windows package stages Sonic Pi source/assets
-  and a Ruby runtime inside the VST3 bundle; it still needs a native Windows build
-  and real DAW test.
+- The Windows build has passed the VST3 SDK validator and command-line audio
+  probes, but the plug-in still needs a real DAW installation and live-use test.
+  Its bundle contains Sonic Pi source/assets and Ruby runtime DLLs, not the MSYS2
+  compiler toolchain.
 
 ## Build and run
 
@@ -31,7 +32,8 @@ Steinberg VST3 SDK v3.8.1, including their required submodules. Ruby 3.2 must be
 available on `PATH` when building and validating the runtime. Windows builds use
 the Visual Studio 2022 x64 generator; the build script copies Ruby and the fetched
 Sonic Pi source/assets into the VST3 bundle, so an installed plug-in does not use
-the build machine's Ruby or source checkout.
+the build machine's Ruby or source checkout. MSYS2 compiler tools and headers are
+excluded from the bundled Ruby runtime.
 
 ```sh
 cmake -S . \
