@@ -29,6 +29,7 @@ public:
 
     ~LiveCodeSubController() override {
         detach(statusLabel_);
+        detach(codeEditorView_);
     }
 
     VSTGUI::CView* createView(
@@ -37,7 +38,12 @@ public:
         const auto* customViewName =
             attributes.getAttributeValue(VSTGUI::IUIDescription::kCustomViewName);
         if (customViewName && *customViewName == "SonicPiTextEditor") {
-            return VSTGUI::createNewTextEditor(VSTGUI::CRect(), owner_);
+            codeEditorView_ =
+                VSTGUI::createNewTextEditor(VSTGUI::CRect(), owner_);
+            if (codeEditorView_) {
+                codeEditorView_->registerViewListener(this);
+            }
+            return codeEditorView_;
         }
         return nullptr;
     }
@@ -83,6 +89,18 @@ public:
             statusLabel_->unregisterViewListener(this);
             statusLabel_ = nullptr;
         }
+        if (view == codeEditorView_) {
+            codeEditorView_->unregisterViewListener(this);
+            codeEditorView_ = nullptr;
+        }
+    }
+
+    void viewAttached(VSTGUI::CView* view) override {
+        if (view == codeEditorView_) {
+            // The starter text is set during construction, before the host has
+            // attached this view. Some hosts miss that first invalidation.
+            view->invalid();
+        }
     }
 
 private:
@@ -98,6 +116,7 @@ private:
 
     Controller* owner_ = nullptr;
     VSTGUI::CTextLabel* statusLabel_ = nullptr;
+    VSTGUI::CView* codeEditorView_ = nullptr;
 };
 
 } // namespace
