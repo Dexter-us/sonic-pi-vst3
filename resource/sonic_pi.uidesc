@@ -17,45 +17,45 @@
     <control-tag name="Status" tag="1002"/>
   </control-tags>
   <template background-color="Panel" class="CViewContainer" name="view"
-            origin="0, 0" size="720, 500" minSize="720, 500" maxSize="720, 500"
+            origin="0, 0" size="560, 420" minSize="560, 420" maxSize="560, 420"
             transparent="false" mouse-enabled="true">
     <view back-color="Panel" class="CTextLabel" font="~ NormalFontBig"
           font-antialias="true" font-color="Text" frame-color="Border"
-          frame-width="1" origin="18, 12" size="684, 42"
+          frame-width="1" origin="18, 12" size="524, 42"
           text-alignment="left" title="Dexter U.S. Sonic Pi v0.1.1"
           transparent="false"/>
     <view back-color="Panel" class="CTextLabel" font="~ NormalFont"
           font-antialias="true" font-color="Muted" frame-color="Panel"
-          frame-width="0" origin="27, 61" size="650, 20"
+          frame-width="0" origin="27, 61" size="506, 20"
           text-alignment="left"
           title="Sonic Pi live-coding instrument  /  Audio output"
           transparent="true"/>
     <view class="CViewContainer" sub-controller="LiveCodeController"
-          origin="24, 88" size="672, 390" transparent="true"
+          origin="24, 88" size="512, 316" transparent="true"
           mouse-enabled="true">
       <view background-color="Editor" background-color-draw-style="filled"
-            bordered="false" class="CScrollView" container-size="672, 324"
-            horizontal-scrollbar="true" origin="0, 0" size="672, 324"
+            bordered="false" class="CScrollView" container-size="512, 250"
+            horizontal-scrollbar="true" origin="0, 0" size="512, 250"
             vertical-scrollbar="true" auto-hide-scrollbars="true"
             scrollbar-width="12" transparent="false">
         <view class="CView" custom-view-name="SonicPiTextEditor"
-              origin="0, 0" size="672, 324" transparent="false"
+              origin="0, 0" size="512, 250" transparent="false"
               mouse-enabled="true" wants-focus="true"/>
       </view>
       <view back-color="Accent" class="CTextButton" control-tag="RunCode"
             font="~ NormalFont" font-antialias="true" font-color="Text"
-            frame-color="Accent" frame-width="1" origin="0, 340"
+            frame-color="Accent" frame-width="1" origin="0, 266"
             size="112, 38" text-alignment="center" title="Run"
             transparent="false"/>
       <view back-color="Border" class="CTextButton" control-tag="StopAll"
             font="~ NormalFont" font-antialias="true" font-color="Text"
-            frame-color="Border" frame-width="1" origin="124, 340"
+            frame-color="Border" frame-width="1" origin="124, 266"
             size="112, 38" text-alignment="center" title="Stop"
             transparent="false"/>
       <view back-color="Panel" class="CTextLabel" control-tag="Status"
             font="~ NormalFontSmall" font-antialias="true"
             font-color="Muted" frame-color="Panel" frame-width="0"
-            origin="252, 349" size="420, 20" text-alignment="left"
+            origin="252, 275" size="260, 20" text-alignment="left"
             title="Runtime starts when the VST is activated"
             transparent="true"/>
     </view>

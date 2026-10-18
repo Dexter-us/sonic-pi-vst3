@@ -139,7 +139,7 @@ VSTGUI::CView* Controller::createCustomView(
     VSTGUI::VST3Editor*) {
     if (name && std::strcmp(name, "SonicPiTextEditor") == 0) {
         return VSTGUI::createNewTextEditor(
-            VSTGUI::CRect(0, 0, 672, 324), this);
+            VSTGUI::CRect(0, 0, 512, 250), this);
     }
     return nullptr;
 }
