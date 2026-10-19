@@ -20,6 +20,9 @@
     <control-tag name="DocumentTitle" tag="1005"/>
     <control-tag name="Complete" tag="1006"/>
     <control-tag name="Snippets" tag="1007"/>
+    <control-tag name="RunSelection" tag="1008"/>
+    <control-tag name="LiveLoops" tag="1009"/>
+    <control-tag name="RuntimeLog" tag="1010"/>
   </control-tags>
   <template background-color="Panel" class="CViewContainer" name="view"
             origin="0, 0" size="560, 420" minSize="560, 420" maxSize="560, 420"
@@ -28,7 +31,7 @@
           font="~ NormalFontBig"
           font-antialias="true" font-color="Text" frame-color="Border"
           frame-width="1" origin="18, 12" size="524, 42"
-          text-alignment="left" title="Dexter U.S. Sonic Pi v0.1.7 - Untitled"
+           text-alignment="left" title="Dexter U.S. Sonic Pi v0.1.8 - Untitled"
           transparent="false"/>
     <view back-color="Panel" class="CTextLabel" font="~ NormalFont"
           font-antialias="true" font-color="Muted" frame-color="Panel"
@@ -40,55 +43,77 @@
           origin="24, 88" size="512, 316" transparent="true"
           mouse-enabled="true">
       <view background-color="Editor" background-color-draw-style="filled"
-            bordered="false" class="CScrollView" container-size="512, 232"
-            horizontal-scrollbar="true" origin="0, 0" size="512, 232"
+            bordered="false" class="CScrollView" container-size="512, 172"
+            horizontal-scrollbar="true" origin="0, 0" size="512, 172"
             vertical-scrollbar="true" auto-hide-scrollbars="true"
             scrollbar-width="12" transparent="false">
         <view class="CView" custom-view-name="SonicPiTextEditor"
-              origin="0, 0" size="512, 232" transparent="false"
+              origin="0, 0" size="512, 172" transparent="false"
               mouse-enabled="true" wants-focus="true"/>
       </view>
       <view back-color="Border" class="CTextButton" control-tag="OpenCode"
             font="~ NormalFont" font-antialias="true" font-color="Text"
-            frame-color="Border" frame-width="1" origin="0, 240"
-            size="54, 34" text-alignment="center" title="Open"
+            frame-color="Border" frame-width="1" origin="0, 180"
+            size="48, 32" text-alignment="center" title="Open"
             transparent="false"/>
       <view back-color="Border" class="CTextButton" control-tag="SaveCode"
             font="~ NormalFont" font-antialias="true" font-color="Text"
-            frame-color="Border" frame-width="1" origin="60, 240"
-            size="54, 34" text-alignment="center" title="Save"
+            frame-color="Border" frame-width="1" origin="52, 180"
+            size="48, 32" text-alignment="center" title="Save"
             transparent="false"/>
       <view back-color="Border" class="CTextButton" control-tag="Complete"
             font="~ NormalFont" font-antialias="true" font-color="Text"
-            frame-color="Border" frame-width="1" origin="120, 240"
-            size="78, 34" text-alignment="center" title="Complete"
+            frame-color="Border" frame-width="1" origin="104, 180"
+            size="72, 32" text-alignment="center" title="Complete"
             transparent="false"/>
       <view back-color="Border" class="CTextButton" control-tag="Snippets"
             font="~ NormalFont" font-antialias="true" font-color="Text"
-            frame-color="Border" frame-width="1" origin="204, 240"
-            size="60, 34" text-alignment="center" title="Snips"
+            frame-color="Border" frame-width="1" origin="180, 180"
+            size="52, 32" text-alignment="center" title="Snips"
+            transparent="false"/>
+      <view back-color="Border" class="CTextButton" control-tag="LiveLoops"
+            font="~ NormalFont" font-antialias="true" font-color="Text"
+            frame-color="Border" frame-width="1" origin="236, 180"
+            size="52, 32" text-alignment="center" title="Loops"
+            transparent="false"/>
+      <view back-color="Border" class="CTextButton" control-tag="RunSelection"
+            font="~ NormalFont" font-antialias="true" font-color="Text"
+            frame-color="Border" frame-width="1" origin="292, 180"
+            size="48, 32" text-alignment="center" title="Sel"
             transparent="false"/>
       <view back-color="Accent" class="CTextButton" control-tag="RunCode"
             font="~ NormalFont" font-antialias="true" font-color="Text"
-            frame-color="Accent" frame-width="1" origin="270, 240"
-            size="72, 34" text-alignment="center" title="Run"
+            frame-color="Accent" frame-width="1" origin="344, 180"
+            size="56, 32" text-alignment="center" title="Run"
             transparent="false"/>
       <view back-color="Border" class="CTextButton" control-tag="StopAll"
             font="~ NormalFont" font-antialias="true" font-color="Text"
-            frame-color="Border" frame-width="1" origin="348, 240"
-            size="72, 34" text-alignment="center" title="Stop"
+            frame-color="Border" frame-width="1" origin="404, 180"
+            size="56, 32" text-alignment="center" title="Stop"
             transparent="false"/>
       <view back-color="Panel" class="CTextLabel" control-tag="Status"
             font="~ NormalFontSmall" font-antialias="true"
             font-color="Muted" frame-color="Panel" frame-width="0"
-            origin="0, 280" size="512, 18" text-alignment="left"
+            origin="0, 216" size="512, 18" text-alignment="left"
             title="Waiting for VST activation..."
             transparent="true"/>
       <view back-color="Panel" class="CTextLabel"
             font="~ NormalFontSmall" font-antialias="true"
             font-color="Muted" frame-color="Panel" frame-width="0"
-            origin="0, 301" size="512, 14" text-alignment="left"
-            title="Ctrl+Space: complete   Ctrl+Enter: run   Ctrl+Shift+Enter: stop"
+            origin="0, 239" size="512, 14" text-alignment="left"
+            title="Sonic Pi runtime output / errors"
+            transparent="true"/>
+      <view back-color="Editor" class="CMultiLineTextLabel"
+            control-tag="RuntimeLog" font="~ NormalFontSmall"
+            font-antialias="true" font-color="Muted" frame-color="Border"
+            frame-width="1" origin="0, 253" size="512, 44"
+            text-alignment="left" title="Waiting for Sonic Pi runtime output..."
+            transparent="false"/>
+      <view back-color="Panel" class="CTextLabel"
+            font="~ NormalFontSmall" font-antialias="true"
+            font-color="Muted" frame-color="Panel" frame-width="0"
+            origin="0, 302" size="512, 14" text-alignment="left"
+            title="Ctrl+Enter run   Ctrl+Shift+Enter stop   Ctrl+Alt+Enter selection"
             transparent="true"/>
     </view>
   </template>

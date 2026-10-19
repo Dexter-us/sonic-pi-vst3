@@ -4,6 +4,7 @@
 #include "clockwork_client.h"
 #include "sonic_pi_runtime_status.h"
 
+#include <cstddef>
 #include <memory>
 #include <string>
 
@@ -29,6 +30,7 @@ public:
     bool failed() const noexcept;
     RuntimeStatus status() const noexcept;
     std::string error() const;
+    std::string logTail(std::size_t maxBytes = 4096) const;
 
 private:
     struct Impl;

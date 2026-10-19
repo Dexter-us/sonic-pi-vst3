@@ -3,9 +3,12 @@
 This prototype combines the upstream Sonic Pi Ruby runtime with the
 SuperSonic/scsynth engine in a loadable VST3. Its VSTGUI editor contains a
 multi-line Sonic Pi code editor with Open/Save, syntax highlighting, Sonic Pi
-completion choices, reusable code snippets, and Run/Stop controls. Ctrl+Space
-opens completions, Ctrl+Enter runs the buffer, and Ctrl+Shift+Enter stops all
-jobs. The audio callback renders directly into the host's stereo output buffers;
+completion choices, reusable code snippets, buffer/selection execution, a
+`live_loop` picker, a runtime log panel, and Run/Stop controls. Ctrl+Space opens
+completions, Ctrl+Enter runs the buffer, Ctrl+Alt+Enter runs the selected code,
+and Ctrl+Shift+Enter stops all jobs. The Loops button lists complete
+`live_loop` blocks found in the current buffer. The log panel shows recent
+Spider runtime output and errors. The audio callback renders directly into the host's stereo output buffers;
 a separate worker runs the Sonic Pi language runtime. It is registered as an
 Instrument/Synth by Dexter U.S., and the editor header carries the same branding.
 
@@ -16,6 +19,8 @@ Instrument/Synth by Dexter U.S., and the editor header carries the same branding
   of the host.
 - There is no VST MIDI input or output path. MIDI-related Sonic Pi APIs are not
   bridged by this prototype.
+- The embedded runtime does not expose Sonic Pi's standalone GUI recording
+  command. Record the plug-in's audio using the DAW's normal recording tools.
 - Completion and snippet choices insert at the text cursor, replacing any
   selected text. They are built into the plug-in and do not require Vim,
   Neovim, or an external Sonic Pi CLI.

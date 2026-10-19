@@ -7,13 +7,16 @@
 #include "vstgui/lib/cdropsource.h"
 #include "vstgui/lib/cframe.h"
 #include "vstgui/lib/cfileselector.h"
+#include "vstgui/lib/controls/ctextlabel.h"
 #include "vstgui/lib/cvstguitimer.h"
+#include "vstgui/lib/idatapackage.h"
 #include "vstgui/lib/controls/coptionmenu.h"
 #include "vstgui/uidescription/uiattributes.h"
 
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cctype>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -22,6 +25,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #if defined(_WIN32)
 #ifndef NOMINMAX
@@ -41,6 +45,9 @@ constexpr Steinberg::int32 kSaveCodeTag = 1004;
 constexpr Steinberg::int32 kDocumentTitleTag = 1005;
 constexpr Steinberg::int32 kCompleteTag = 1006;
 constexpr Steinberg::int32 kSnippetsTag = 1007;
+constexpr Steinberg::int32 kRunSelectionTag = 1008;
+constexpr Steinberg::int32 kLiveLoopsTag = 1009;
+constexpr Steinberg::int32 kRuntimeLogTag = 1010;
 
 const char* statusText(RuntimeStatus status) {
     switch (status) {
@@ -119,6 +126,187 @@ bool writeCodeFile(const std::string& utf8Path, const std::string& code) {
     output.write(code.data(), static_cast<std::streamsize>(code.size()));
     output.flush();
     return output.good();
+}
+
+struct LiveLoopBlock {
+    std::string label;
+    std::string code;
+};
+
+bool isRubyWordStart(char character) {
+    return (character >= 'a' && character <= 'z') ||
+           (character >= 'A' && character <= 'Z') || character == '_';
+}
+
+bool isRubyWordCharacter(char character) {
+    return isRubyWordStart(character) ||
+           (character >= '0' && character <= '9');
+}
+
+std::vector<std::string_view> rubyTokens(std::string_view line) {
+    std::vector<std::string_view> tokens;
+    char quote = 0;
+    bool escaped = false;
+    for (std::size_t index = 0; index < line.size();) {
+        const char character = line[index];
+        if (quote) {
+            if (escaped) {
+                escaped = false;
+            } else if (character == '\\') {
+                escaped = true;
+            } else if (character == quote) {
+                quote = 0;
+            }
+            ++index;
+            continue;
+        }
+        if (character == '#') break;
+        if (character == '\'' || character == '"' || character == '`') {
+            quote = character;
+            ++index;
+            continue;
+        }
+        if (!isRubyWordStart(character)) {
+            ++index;
+            continue;
+        }
+        const std::size_t start = index++;
+        while (index < line.size() && isRubyWordCharacter(line[index])) {
+            ++index;
+        }
+        if (index < line.size() &&
+            (line[index] == '!' || line[index] == '?')) {
+            ++index;
+        }
+        tokens.push_back(line.substr(start, index - start));
+    }
+    return tokens;
+}
+
+bool isRubyBlockStarter(std::string_view token) {
+    return token == "begin" || token == "case" || token == "class" ||
+           token == "def" || token == "for" || token == "if" ||
+           token == "module" || token == "unless" || token == "until" ||
+           token == "while";
+}
+
+bool isRubyLoopKeyword(std::string_view token) {
+    return token == "for" || token == "until" || token == "while";
+}
+
+bool findRubyBlockEnd(std::string_view source,
+                      std::size_t firstLineStart,
+                      std::size_t& blockEnd) {
+    std::size_t depth = 0;
+    std::size_t lineStart = firstLineStart;
+    while (lineStart <= source.size()) {
+        const auto newline = source.find('\n', lineStart);
+        const auto lineEnd = newline == std::string_view::npos
+            ? source.size()
+            : newline;
+        const auto tokens = rubyTokens(
+            source.substr(lineStart, lineEnd - lineStart));
+        const bool startsBlock = !tokens.empty() &&
+                                 isRubyBlockStarter(tokens.front());
+        const bool loopKeyword = startsBlock &&
+                                 isRubyLoopKeyword(tokens.front());
+        if (startsBlock) ++depth;
+
+        for (std::size_t index = startsBlock ? 1u : 0u;
+             index < tokens.size(); ++index) {
+            if (tokens[index] == "do") {
+                // A while/for/until block may spell its opener with "do";
+                // it is the same block, not a second nesting level.
+                if (!loopKeyword) ++depth;
+            } else if (tokens[index] == "end") {
+                if (depth == 0) return false;
+                --depth;
+                if (depth == 0) {
+                    blockEnd = lineEnd;
+                    return true;
+                }
+            }
+        }
+
+        if (newline == std::string_view::npos) break;
+        lineStart = newline + 1;
+    }
+    return false;
+}
+
+std::vector<LiveLoopBlock> findLiveLoopBlocks(std::string_view source) {
+    std::vector<LiveLoopBlock> loops;
+    std::size_t lineStart = 0;
+    std::size_t lineNumber = 1;
+    while (lineStart < source.size()) {
+        const auto newline = source.find('\n', lineStart);
+        const auto lineEnd = newline == std::string_view::npos
+            ? source.size()
+            : newline;
+        const auto line = source.substr(lineStart, lineEnd - lineStart);
+        const auto tokens = rubyTokens(line);
+        if (!tokens.empty() && tokens.front() == "live_loop") {
+            std::size_t blockEnd = lineEnd;
+            if (findRubyBlockEnd(source, lineStart, blockEnd)) {
+                std::string header(line);
+                const auto firstCharacter = header.find_first_not_of(" \t");
+                if (firstCharacter != std::string::npos) {
+                    header.erase(0, firstCharacter);
+                }
+                constexpr std::size_t kMaxHeaderLength = 52;
+                if (header.size() > kMaxHeaderLength) {
+                    header.resize(kMaxHeaderLength - 3);
+                    header += "...";
+                }
+                loops.push_back({
+                    "Line " + std::to_string(lineNumber) + ": " + header,
+                    std::string(source.substr(lineStart, blockEnd - lineStart))
+                });
+            }
+        }
+        if (newline == std::string_view::npos) break;
+        lineStart = newline + 1;
+        ++lineNumber;
+    }
+    return loops;
+}
+
+std::string formatRuntimeLog(std::string log) {
+    log = normalizeLineEndings(std::move(log));
+    std::vector<std::string_view> lines;
+    std::size_t lineStart = 0;
+    while (lineStart < log.size()) {
+        const auto newline = log.find('\n', lineStart);
+        const auto lineEnd = newline == std::string::npos ? log.size() : newline;
+        auto line = std::string_view(log).substr(lineStart, lineEnd - lineStart);
+        const auto first = line.find_first_not_of(" \t");
+        if (first != std::string_view::npos) {
+            line.remove_prefix(first);
+            while (!line.empty() &&
+                   (line.back() == ' ' || line.back() == '\t')) {
+                line.remove_suffix(1);
+            }
+            lines.push_back(line);
+        }
+        if (newline == std::string::npos) break;
+        lineStart = newline + 1;
+    }
+
+    if (lines.empty()) return "Waiting for Sonic Pi runtime output...";
+    std::string display;
+    const auto firstLine = lines.size() > 3 ? lines.size() - 3 : 0;
+    for (std::size_t index = firstLine; index < lines.size(); ++index) {
+        if (!display.empty()) display.push_back('\n');
+        const auto line = lines[index];
+        constexpr std::size_t kMaxDisplayLineLength = 82;
+        if (line.size() > kMaxDisplayLineLength) {
+            display.append(line.substr(0, kMaxDisplayLineLength - 3));
+            display += "...";
+        } else {
+            display.append(line);
+        }
+    }
+    return display;
 }
 
 std::string chooseCodeFile(VSTGUI::CControl* control, bool save) {
@@ -400,6 +588,12 @@ public:
                            "Inserted completion");
         } else if (control->getTag() == kSnippetsTag) {
             showInsertMenu(control, kSnippetChoices, "Inserted snippet");
+        } else if (control->getTag() == kRunSelectionTag) {
+            const bool sent = owner_->sendSelectedCode();
+            showStatus(sent ? "Selected code sent to Sonic Pi"
+                            : "Select code in the editor first");
+        } else if (control->getTag() == kLiveLoopsTag) {
+            showLiveLoopMenu(control);
         } else if (control->getTag() == kRunCodeTag) {
             const bool sent = owner_->sendCurrentCode();
             showStatus(sent ? "Run request submitted..."
@@ -426,6 +620,11 @@ public:
                 documentTitleLabel_ = label;
                 documentTitleLabel_->registerViewListener(this);
                 refreshDocumentTitle();
+            } else if (label->getTag() == kRuntimeLogTag) {
+                runtimeLogLabel_ = label;
+                runtimeLogLabel_->registerViewListener(this);
+                runtimeLogLabel_->setText(
+                    "Waiting for Sonic Pi runtime output...");
             }
         }
         return view;
@@ -440,6 +639,10 @@ public:
         if (view == documentTitleLabel_) {
             documentTitleLabel_->unregisterViewListener(this);
             documentTitleLabel_ = nullptr;
+        }
+        if (view == runtimeLogLabel_) {
+            runtimeLogLabel_->unregisterViewListener(this);
+            runtimeLogLabel_ = nullptr;
         }
         if (view == codeEditorView_) {
             if (keyboardFrame_) {
@@ -494,14 +697,20 @@ public:
                               event.virt == VSTGUI::VirtualKey::Enter;
         if (!enterKey) return;
 
+        const bool selectionShortcut = event.modifiers.is(
+            {VSTGUI::ModifierKey::Control, VSTGUI::ModifierKey::Alt});
         const bool stopShortcut = event.modifiers.is(
             {VSTGUI::ModifierKey::Control, VSTGUI::ModifierKey::Shift});
         const bool runShortcut =
             event.modifiers.is(VSTGUI::ModifierKey::Control);
-        if (!runShortcut && !stopShortcut) return;
+        if (!selectionShortcut && !runShortcut && !stopShortcut) return;
 
         event.consumed = true;
-        if (stopShortcut) {
+        if (selectionShortcut) {
+            const bool sent = owner_->sendSelectedCode();
+            showStatus(sent ? "Selected code sent to Sonic Pi"
+                            : "Select code in the editor first");
+        } else if (stopShortcut) {
             const bool sent = owner_->sendStopAll();
             showStatus(sent ? "Stop requested..."
                             : "Stop request failed; checking runtime status...");
@@ -551,15 +760,59 @@ private:
                     });
     }
 
+    void showLiveLoopMenu(VSTGUI::CView* anchor) {
+        if (!anchor || !anchor->getFrame()) return;
+        auto loops = findLiveLoopBlocks(owner_->currentCode());
+        if (loops.empty()) {
+            showNotice("No complete live_loop blocks found");
+            return;
+        }
+
+        auto menu = VSTGUI::makeOwned<VSTGUI::COptionMenu>();
+        menu->setStyle(VSTGUI::COptionMenu::kPopupStyle);
+        for (const auto& loop : loops) {
+            menu->addEntry(loop.label.c_str());
+        }
+
+        VSTGUI::CPoint location(0, anchor->getViewSize().getHeight());
+        anchor->localToFrame(location);
+        menu->popup(anchor->getFrame(), location,
+                    [this, loops = std::move(loops)](
+                        VSTGUI::COptionMenu* selected) {
+                        if (!selected) return;
+                        const auto index = selected->getLastResult();
+                        if (index < 0 ||
+                            static_cast<std::size_t>(index) >= loops.size()) {
+                            return;
+                        }
+                        if (owner_->sendRunCode(
+                                loops[static_cast<std::size_t>(index)].code)) {
+                            showNotice("Live loop sent to Sonic Pi");
+                        } else {
+                            showNotice("Could not send live_loop code");
+                        }
+                    });
+    }
+
     void refreshStatus() {
         if (!statusLabel_) return;
         owner_->requestRuntimeStatus();
+        owner_->requestRuntimeLog();
         refreshDocumentTitle();
+        refreshRuntimeLog();
         if (std::chrono::steady_clock::now() < noticeUntil_) {
             showStatus(noticeText_.c_str());
             return;
         }
         showStatus(statusText(owner_->runtimeStatus()));
+    }
+
+    void refreshRuntimeLog() {
+        if (!runtimeLogLabel_) return;
+        auto text = formatRuntimeLog(owner_->runtimeLog());
+        if (text == runtimeLogText_) return;
+        runtimeLogText_ = std::move(text);
+        runtimeLogLabel_->setText(runtimeLogText_.c_str());
     }
 
     void refreshDocumentTitle() {
@@ -655,11 +908,13 @@ private:
     Controller* owner_ = nullptr;
     VSTGUI::CTextLabel* statusLabel_ = nullptr;
     VSTGUI::CTextLabel* documentTitleLabel_ = nullptr;
+    VSTGUI::CTextLabel* runtimeLogLabel_ = nullptr;
     VSTGUI::CView* codeEditorView_ = nullptr;
     VSTGUI::CFrame* keyboardFrame_ = nullptr;
     VSTGUI::SharedPointer<VSTGUI::CVSTGUITimer> statusTimer_;
     std::string currentFilePath_;
     std::string savedCode_ = kStarterCode;
+    std::string runtimeLogText_;
     std::string noticeText_;
     std::chrono::steady_clock::time_point noticeUntil_{};
 };
@@ -713,6 +968,37 @@ bool Controller::sendCurrentCode() {
     return codeEditor_ && sendRunCode(codeEditor_->getPlainText());
 }
 
+bool Controller::sendSelectedCode() {
+    if (!codeEditor_) return false;
+    auto* editorView = dynamic_cast<VSTGUI::CView*>(
+        const_cast<VSTGUI::ITextEditor*>(codeEditor_));
+    auto* frame = editorView ? editorView->getFrame() : nullptr;
+    if (!frame) return false;
+    const auto previousClipboard = frame->getClipboard();
+    if (!codeEditor_->handleCommand(VSTGUI::ITextEditor::Command::Copy)) {
+        return false;
+    }
+    // Copy updates the clipboard, so capture the selected source first and
+    // restore the user's previous clipboard contents immediately afterward.
+    const auto copiedSelection = frame->getClipboard();
+    std::string code;
+    if (copiedSelection) {
+        for (std::uint32_t index = 0;
+             index < copiedSelection->getCount(); ++index) {
+            const void* bytes = nullptr;
+            VSTGUI::IDataPackage::Type type = VSTGUI::IDataPackage::kError;
+            const auto size =
+                copiedSelection->getData(index, bytes, type);
+            if (type == VSTGUI::IDataPackage::kText && bytes && size > 0) {
+                code.assign(static_cast<const char*>(bytes), size);
+                break;
+            }
+        }
+    }
+    frame->setClipboard(previousClipboard);
+    return sendRunCode(code);
+}
+
 std::string Controller::currentCode() const {
     return codeEditor_ ? codeEditor_->getPlainText() : std::string{};
 }
@@ -759,8 +1045,20 @@ bool Controller::requestRuntimeStatus() {
     return sendMessage(message) == Steinberg::kResultOk;
 }
 
+bool Controller::requestRuntimeLog() {
+    auto message = Steinberg::owned(allocateMessage());
+    if (!message) return false;
+    message->setMessageID("SonicPi.GetLog");
+    return sendMessage(message) == Steinberg::kResultOk;
+}
+
 RuntimeStatus Controller::runtimeStatus() const noexcept {
     return runtimeStatus_.load();
+}
+
+std::string Controller::runtimeLog() const {
+    std::lock_guard<std::mutex> lock(runtimeLogMutex_);
+    return runtimeLog_;
 }
 
 Steinberg::tresult PLUGIN_API Controller::notify(
@@ -776,6 +1074,19 @@ Steinberg::tresult PLUGIN_API Controller::notify(
             state >= static_cast<Steinberg::int64>(RuntimeStatus::inactive) &&
             state <= static_cast<Steinberg::int64>(RuntimeStatus::error)) {
             runtimeStatus_.store(static_cast<RuntimeStatus>(state));
+        }
+        return Steinberg::kResultOk;
+    }
+    if (messageId && std::strcmp(messageId, "SonicPi.RuntimeLog") == 0) {
+        auto* attributes = message->getAttributes();
+        const void* bytes = nullptr;
+        Steinberg::uint32 size = 0;
+        if (attributes &&
+            attributes->getBinary("log", bytes, size) == Steinberg::kResultOk &&
+            size <= 4096 && (size == 0 || bytes)) {
+            std::lock_guard<std::mutex> lock(runtimeLogMutex_);
+            runtimeLog_.assign(
+                size == 0 ? "" : static_cast<const char*>(bytes), size);
         }
         return Steinberg::kResultOk;
     }

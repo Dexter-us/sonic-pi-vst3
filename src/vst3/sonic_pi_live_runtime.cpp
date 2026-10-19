@@ -285,6 +285,7 @@ struct SonicPiLiveRuntime::Impl {
     std::filesystem::path rubyExecutable;
     std::filesystem::path userHome;
     std::filesystem::path logPath;
+    mutable std::mutex logPathMutex;
     std::uint16_t controlPort = 0;
     std::uint16_t guiPort = 0;
     std::uint16_t cuePort = 0;
@@ -406,7 +407,10 @@ struct SonicPiLiveRuntime::Impl {
             : std::filesystem::temp_directory_path();
         userHome = base / ".sonic-pi-vst";
 #endif
-        logPath = userHome / "spider-runtime.log";
+        {
+            std::lock_guard<std::mutex> lock(logPathMutex);
+            logPath = userHome / "spider-runtime.log";
+        }
 
         try {
             std::filesystem::create_directories(userHome);
@@ -798,6 +802,44 @@ RuntimeStatus SonicPiLiveRuntime::status() const noexcept {
 
 std::string SonicPiLiveRuntime::error() const {
     return impl_->getError();
+}
+
+std::string SonicPiLiveRuntime::logTail(std::size_t maxBytes) const {
+    if (!impl_ || maxBytes == 0) return {};
+
+    std::filesystem::path path;
+    {
+        std::lock_guard<std::mutex> lock(impl_->logPathMutex);
+        path = impl_->logPath;
+    }
+    if (path.empty()) return {};
+
+    std::ifstream log(path, std::ios::binary);
+    if (!log) return {};
+    log.seekg(0, std::ios::end);
+    const auto endPosition = log.tellg();
+    if (endPosition == std::streampos(-1) ||
+        endPosition == std::streampos(0)) {
+        return {};
+    }
+    const auto end = static_cast<std::streamoff>(endPosition);
+
+    const auto start = end > static_cast<std::streamoff>(maxBytes)
+        ? end - static_cast<std::streamoff>(maxBytes)
+        : std::streamoff{0};
+    log.seekg(start);
+    std::string tail(
+        (std::istreambuf_iterator<char>(log)),
+        std::istreambuf_iterator<char>());
+    if (log.bad()) return {};
+
+    if (start > 0) {
+        const auto firstLineBreak = tail.find('\n');
+        if (firstLineBreak != std::string::npos) {
+            tail.erase(0, firstLineBreak + 1);
+        }
+    }
+    return tail;
 }
 
 } // namespace SonicPiVst3

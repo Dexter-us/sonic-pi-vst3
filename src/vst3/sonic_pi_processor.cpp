@@ -135,6 +135,23 @@ Steinberg::tresult PLUGIN_API Processor::notify(
             ? Steinberg::kResultOk
             : Steinberg::kResultFalse;
     }
+    if (std::strcmp(messageId, "SonicPi.GetLog") == 0) {
+        auto response = Steinberg::owned(allocateMessage());
+        if (!response) return Steinberg::kResultFalse;
+        response->setMessageID("SonicPi.RuntimeLog");
+        const auto log = runtime_ ? runtime_->logTail() : std::string{};
+        auto* attributes = response->getAttributes();
+        if (!attributes ||
+            attributes->setBinary(
+                "log", log.data(),
+                static_cast<Steinberg::uint32>(log.size())) !=
+                Steinberg::kResultOk) {
+            return Steinberg::kResultFalse;
+        }
+        return sendMessage(response) == Steinberg::kResultOk
+            ? Steinberg::kResultOk
+            : Steinberg::kResultFalse;
+    }
     return Steinberg::kNotImplemented;
 }
 

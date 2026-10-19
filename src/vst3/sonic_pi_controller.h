@@ -7,6 +7,7 @@
 #include "vstgui/lib/ctexteditor.h"
 
 #include <atomic>
+#include <mutex>
 #include <string>
 #include <string_view>
 
@@ -39,9 +40,12 @@ public:
     bool replaceCurrentCode(const std::string& code);
     bool insertTextAtCursor(std::string_view text);
     bool sendCurrentCode();
+    bool sendSelectedCode();
     bool sendStopAll();
     bool requestRuntimeStatus();
+    bool requestRuntimeLog();
     RuntimeStatus runtimeStatus() const noexcept;
+    std::string runtimeLog() const;
     Steinberg::tresult PLUGIN_API notify(
         Steinberg::Vst::IMessage* message) override;
 
@@ -65,6 +69,8 @@ private:
     const VSTGUI::ITextEditor* codeEditor_ = nullptr;
     VSTGUI::TextEditorColorization::IStyleProvider::Styles syntaxStyles_;
     std::atomic<RuntimeStatus> runtimeStatus_{RuntimeStatus::inactive};
+    mutable std::mutex runtimeLogMutex_;
+    std::string runtimeLog_;
 };
 
 } // namespace SonicPiVst3
