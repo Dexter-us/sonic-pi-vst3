@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "sonic_pi_controller.h"
+#include "sonic_pi_editor_help.h"
 #include "plugin_ids.h"
 
 #include "pluginterfaces/vst/ivstmessage.h"
@@ -15,6 +16,7 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <chrono>
 #include <cctype>
 #include <cstring>
@@ -48,6 +50,9 @@ constexpr Steinberg::int32 kSnippetsTag = 1007;
 constexpr Steinberg::int32 kRunSelectionTag = 1008;
 constexpr Steinberg::int32 kLiveLoopsTag = 1009;
 constexpr Steinberg::int32 kRuntimeLogTag = 1010;
+constexpr Steinberg::int32 kGoToErrorTag = 1011;
+constexpr Steinberg::int32 kCodeHelpLabelTag = 1012;
+constexpr Steinberg::int32 kCodeHelpTag = 1013;
 
 const char* statusText(RuntimeStatus status) {
     switch (status) {
@@ -309,6 +314,108 @@ std::string formatRuntimeLog(std::string log) {
     return display;
 }
 
+struct RuntimeErrorEvent {
+    int line = 0;
+    std::string message;
+};
+
+std::string appendedLogText(std::string_view previous,
+                            std::string_view current) {
+    if (previous.empty()) return std::string(current);
+    if (current.size() >= previous.size() &&
+        current.substr(0, previous.size()) == previous) {
+        return std::string(current.substr(previous.size()));
+    }
+
+    const auto maxOverlap = std::min(previous.size(), current.size());
+    for (std::size_t overlap = maxOverlap; overlap > 0; --overlap) {
+        if (previous.substr(previous.size() - overlap, overlap) ==
+            current.substr(0, overlap)) {
+            return std::string(current.substr(overlap));
+        }
+    }
+    return std::string(current);
+}
+
+std::vector<RuntimeErrorEvent> parseRuntimeErrorEvents(
+    std::string_view appended) {
+    std::vector<RuntimeErrorEvent> events;
+    constexpr std::string_view kPrefix = "[ruby-error] ";
+    std::size_t lineStart = 0;
+    while (lineStart < appended.size()) {
+        const auto newline = appended.find('\n', lineStart);
+        const auto lineEnd =
+            newline == std::string_view::npos ? appended.size() : newline;
+        auto line = appended.substr(lineStart, lineEnd - lineStart);
+        if (line.starts_with(kPrefix) &&
+            (line.find("SyntaxError") != std::string_view::npos ||
+             line.find("Exception") != std::string_view::npos)) {
+            const auto marker = line.find(" line=");
+            if (marker != std::string_view::npos) {
+                const auto numberStart = marker + 6;
+                const auto colon = line.find(':', numberStart);
+                if (colon != std::string_view::npos) {
+                    int reportedLine = 0;
+                    const auto parseResult = std::from_chars(
+                        line.data() + numberStart, line.data() + colon,
+                        reportedLine);
+                    if (parseResult.ec == std::errc{} &&
+                        parseResult.ptr == line.data() + colon &&
+                        reportedLine != 0) {
+                        auto message = line.substr(colon + 1);
+                        const auto first =
+                            message.find_first_not_of(" \t");
+                        if (first != std::string_view::npos) {
+                            message.remove_prefix(first);
+                        }
+                        events.push_back(
+                            {reportedLine, std::string(message)});
+                    }
+                }
+            }
+        }
+        if (newline == std::string_view::npos) break;
+        lineStart = newline + 1;
+    }
+    return events;
+}
+
+bool findUniqueSourceLineOffset(std::string_view source,
+                                std::string_view submitted,
+                                std::size_t& lineOffset,
+                                std::size_t& sourceLineCount) {
+    if (source.empty() || submitted.empty()) return false;
+    const auto first = source.find(submitted);
+    if (first == std::string_view::npos ||
+        source.find(submitted, first + 1) != std::string_view::npos) {
+        return false;
+    }
+
+    lineOffset = static_cast<std::size_t>(
+        std::count(source.begin(), source.begin() +
+                   static_cast<std::ptrdiff_t>(first), '\n'));
+    sourceLineCount =
+        1 + static_cast<std::size_t>(std::count(source.begin(), source.end(), '\n'));
+    return true;
+}
+
+std::string_view sourceLineAt(std::string_view source, std::size_t lineNumber) {
+    if (lineNumber == 0) return {};
+    std::size_t lineStart = 0;
+    for (std::size_t line = 1; line < lineNumber; ++line) {
+        const auto newline = source.find('\n', lineStart);
+        if (newline == std::string_view::npos) return {};
+        lineStart = newline + 1;
+    }
+    const auto lineEnd = source.find('\n', lineStart);
+    auto result = source.substr(
+        lineStart, lineEnd == std::string_view::npos
+                       ? source.size() - lineStart
+                       : lineEnd - lineStart);
+    if (!result.empty() && result.back() == '\r') result.remove_suffix(1);
+    return result;
+}
+
 std::string chooseCodeFile(VSTGUI::CControl* control, bool save) {
     auto* selector = VSTGUI::CNewFileSelector::create(
         control ? control->getFrame() : nullptr,
@@ -345,6 +452,7 @@ const VSTGUI::CColor kSymbolColor(224, 108, 117, 255);
 const VSTGUI::CColor kStringColor(152, 195, 121, 255);
 const VSTGUI::CColor kNumberColor(209, 154, 102, 255);
 const VSTGUI::CColor kCommentColor(125, 133, 148, 255);
+const VSTGUI::CColor kErrorColor(255, 105, 105, 255);
 
 constexpr std::u32string_view kRubyKeywords[] = {
     U"and", U"begin", U"break", U"case", U"class", U"def", U"do", U"else",
@@ -534,14 +642,6 @@ HighlightStyles tokenizeSonicPi(std::u32string_view text) {
     return styles;
 }
 
-constexpr char kStarterCode[] =
-    "use_bpm 110\n"
-    "\n"
-    "live_loop :pulse do\n"
-    "  play 60, amp: 0.5\n"
-    "  sleep 1\n"
-    "end";
-
 class LiveCodeSubController final : public VSTGUI::IController,
                                     public VSTGUI::ViewListenerAdapter,
                                     public VSTGUI::IKeyboardHook {
@@ -555,6 +655,7 @@ public:
             keyboardFrame_ = nullptr;
         }
         detach(statusLabel_);
+        detach(helpLabel_);
         detach(codeEditorView_);
     }
 
@@ -594,6 +695,12 @@ public:
                             : "Select code in the editor first");
         } else if (control->getTag() == kLiveLoopsTag) {
             showLiveLoopMenu(control);
+        } else if (control->getTag() == kGoToErrorTag) {
+            showNotice(owner_->goToRuntimeError()
+                           ? "Moved to the Sonic Pi error line"
+                           : "No mapped error line to navigate to");
+        } else if (control->getTag() == kCodeHelpTag) {
+            showCodeHelpMenu(control);
         } else if (control->getTag() == kRunCodeTag) {
             const bool sent = owner_->sendCurrentCode();
             showStatus(sent ? "Run request submitted..."
@@ -625,6 +732,11 @@ public:
                 runtimeLogLabel_->registerViewListener(this);
                 runtimeLogLabel_->setText(
                     "Waiting for Sonic Pi runtime output...");
+            } else if (label->getTag() == kCodeHelpLabelTag) {
+                helpLabel_ = label;
+                helpLabel_->registerViewListener(this);
+                helpLabel_->setText(
+                    "Select a Sonic Pi name and choose Docs for its help.");
             }
         }
         return view;
@@ -643,6 +755,10 @@ public:
         if (view == runtimeLogLabel_) {
             runtimeLogLabel_->unregisterViewListener(this);
             runtimeLogLabel_ = nullptr;
+        }
+        if (view == helpLabel_) {
+            helpLabel_->unregisterViewListener(this);
+            helpLabel_ = nullptr;
         }
         if (view == codeEditorView_) {
             if (keyboardFrame_) {
@@ -686,6 +802,14 @@ public:
         }
 
         if (event.virt == VSTGUI::VirtualKey::Space &&
+            event.modifiers.is({VSTGUI::ModifierKey::Control,
+                                VSTGUI::ModifierKey::Shift})) {
+            event.consumed = true;
+            showCodeHelpMenu(codeEditorView_);
+            return;
+        }
+
+        if (event.virt == VSTGUI::VirtualKey::Space &&
             event.modifiers.is(VSTGUI::ModifierKey::Control)) {
             event.consumed = true;
             showInsertMenu(codeEditorView_, kCompletionChoices,
@@ -722,6 +846,50 @@ public:
     }
 
 private:
+    void showCodeHelpMenu(VSTGUI::CView* anchor) {
+        if (!anchor || !anchor->getFrame()) return;
+
+        const auto selected = owner_->selectedText();
+        if (const auto* topic = findCodeHelpTopic(selected)) {
+            displayCodeHelp(*topic);
+            return;
+        }
+
+        auto menu = VSTGUI::makeOwned<VSTGUI::COptionMenu>();
+        menu->setStyle(VSTGUI::COptionMenu::kPopupStyle);
+        for (const auto& topic : kCodeHelpTopics) {
+            const std::string label(topic.menuLabel);
+            menu->addEntry(label.c_str());
+        }
+
+        VSTGUI::CPoint location(0, anchor->getViewSize().getHeight());
+        anchor->localToFrame(location);
+        menu->popup(anchor->getFrame(), location,
+                    [this](VSTGUI::COptionMenu* selectedTopic) {
+                        if (!selectedTopic) return;
+                        const auto index = selectedTopic->getLastResult();
+                        if (index < 0 ||
+                            static_cast<std::size_t>(index) >=
+                                kCodeHelpTopics.size()) {
+                            return;
+                        }
+                        displayCodeHelp(
+                            kCodeHelpTopics[static_cast<std::size_t>(index)]);
+                    });
+    }
+
+    void displayCodeHelp(const CodeHelpTopic& topic) {
+        if (!helpLabel_) return;
+        std::string text(topic.menuLabel);
+        text += "\n";
+        constexpr std::size_t kMaxHelpSummaryLength = 96;
+        text += topic.summary.substr(0, kMaxHelpSummaryLength);
+        if (topic.summary.size() > kMaxHelpSummaryLength) text += "...";
+        text += "\nExample: ";
+        text += topic.example;
+        helpLabel_->setText(text.c_str());
+    }
+
     template <std::size_t N>
     void showInsertMenu(VSTGUI::CView* anchor,
                         const EditorChoice (&choices)[N],
@@ -804,19 +972,54 @@ private:
             showStatus(noticeText_.c_str());
             return;
         }
+        const auto diagnostic = owner_->runtimeDiagnostic();
+        if (!diagnostic.message.empty()) {
+            std::string text = "Sonic Pi error";
+            if (diagnostic.lineMapped) {
+                text += " on line " + std::to_string(diagnostic.editorLine);
+            } else if (diagnostic.submittedLine > 0) {
+                text += " in submitted code, line " +
+                        std::to_string(diagnostic.submittedLine);
+            }
+            text += ": ";
+            constexpr std::size_t kMaxStatusMessage = 72;
+            text += diagnostic.message.substr(0, kMaxStatusMessage);
+            if (diagnostic.message.size() > kMaxStatusMessage) text += "...";
+            showStatus(text.c_str());
+            return;
+        }
         showStatus(statusText(owner_->runtimeStatus()));
     }
 
     void refreshRuntimeLog() {
+        const auto diagnostic = owner_->runtimeDiagnostic();
+        std::string diagnosticKey = std::to_string(diagnostic.editorLine);
+        diagnosticKey += "/";
+        diagnosticKey += std::to_string(diagnostic.submittedLine);
+        diagnosticKey += "/";
+        diagnosticKey += diagnostic.message;
+        if (diagnosticKey != runtimeDiagnosticKey_) {
+            runtimeDiagnosticKey_ = std::move(diagnosticKey);
+            if (codeEditorView_) codeEditorView_->invalid();
+        }
+
         if (!runtimeLogLabel_) return;
         auto text = formatRuntimeLog(owner_->runtimeLog());
         if (text == runtimeLogText_) return;
         runtimeLogText_ = std::move(text);
         runtimeLogLabel_->setText(runtimeLogText_.c_str());
+        if (codeEditorView_) codeEditorView_->invalid();
     }
 
     void refreshDocumentTitle() {
         if (!documentTitleLabel_) return;
+        std::string restored;
+        if (owner_->takeRestoredCode(restored)) {
+            savedCode_ = std::move(restored);
+            // A DAW project is portable; never silently overwrite an external
+            // file at an absolute path saved on another computer.
+            currentFilePath_.clear();
+        }
         const auto code = owner_->currentCode();
         const bool dirty = code != savedCode_;
         std::string title = "Dexter U.S. Sonic Pi v";
@@ -841,6 +1044,7 @@ private:
     }
 
     bool saveCodeFile(VSTGUI::CControl* control) {
+        refreshDocumentTitle();
         const auto code = owner_->currentCode();
         std::string path = currentFilePath_;
         if (path.empty()) path = chooseCodeFile(control, true);
@@ -858,6 +1062,7 @@ private:
     }
 
     void openCodeFile(VSTGUI::CControl* control) {
+        refreshDocumentTitle();
         const auto path = chooseCodeFile(control, false);
         if (path.empty()) return;
 
@@ -909,12 +1114,14 @@ private:
     VSTGUI::CTextLabel* statusLabel_ = nullptr;
     VSTGUI::CTextLabel* documentTitleLabel_ = nullptr;
     VSTGUI::CTextLabel* runtimeLogLabel_ = nullptr;
+    VSTGUI::CTextLabel* helpLabel_ = nullptr;
     VSTGUI::CView* codeEditorView_ = nullptr;
     VSTGUI::CFrame* keyboardFrame_ = nullptr;
     VSTGUI::SharedPointer<VSTGUI::CVSTGUITimer> statusTimer_;
     std::string currentFilePath_;
     std::string savedCode_ = kStarterCode;
     std::string runtimeLogText_;
+    std::string runtimeDiagnosticKey_;
     std::string noticeText_;
     std::chrono::steady_clock::time_point noticeUntil_{};
 };
@@ -923,6 +1130,54 @@ private:
 
 Controller::~Controller() {
     if (codeEditor_) codeEditor_->resetController();
+}
+
+Steinberg::tresult PLUGIN_API Controller::getState(Steinberg::IBStream* state) {
+    return writeCodeState(state, currentCode())
+        ? Steinberg::kResultOk : Steinberg::kResultFalse;
+}
+
+Steinberg::tresult PLUGIN_API Controller::setState(Steinberg::IBStream* state) {
+    std::string code;
+    if (!readCodeState(state, code)) return Steinberg::kResultFalse;
+    if (codeEditor_ && codeEditor_->getPlainText() != code) {
+        restoringCode_ = true;
+        const bool restored = codeEditor_->setPlainText(code, true);
+        restoringCode_ = false;
+        if (!restored) return Steinberg::kResultFalse;
+    }
+    codeState_ = std::move(code);
+    restoredCodeForUi_ = codeState_;
+    syncCodeState();
+    return Steinberg::kResultOk;
+}
+
+Steinberg::tresult PLUGIN_API Controller::setComponentState(
+    Steinberg::IBStream* state) {
+    return setState(state);
+}
+
+bool Controller::takeRestoredCode(std::string& code) {
+    if (!restoredCodeForUi_) return false;
+    code = std::move(*restoredCodeForUi_);
+    restoredCodeForUi_.reset();
+    return true;
+}
+
+bool Controller::syncCodeState() {
+    if (codeState_.size() > kMaxCodeStateBytes) return false;
+    auto message = Steinberg::owned(allocateMessage());
+    if (!message) return false;
+    message->setMessageID("SonicPi.EditorState");
+    auto* attributes = message->getAttributes();
+    if (!attributes ||
+        attributes->setBinary(
+            "code", codeState_.data(),
+            static_cast<Steinberg::uint32>(codeState_.size())) !=
+            Steinberg::kResultOk) {
+        return false;
+    }
+    return sendMessage(message) == Steinberg::kResultOk;
 }
 
 Steinberg::IPlugView* PLUGIN_API Controller::createView(const char* name) {
@@ -939,7 +1194,7 @@ VSTGUI::CView* Controller::createCustomView(
     VSTGUI::VST3Editor*) {
     if (name && std::strcmp(name, "SonicPiTextEditor") == 0) {
         return VSTGUI::createNewTextEditor(
-            VSTGUI::CRect(0, 0, 512, 250), this);
+            VSTGUI::CRect(0, 0, 512, 160), this);
     }
     return nullptr;
 }
@@ -956,6 +1211,23 @@ VSTGUI::IController* Controller::createSubController(
 
 bool Controller::sendRunCode(const std::string& code) {
     if (code.empty() || code.size() > 32000) return false;
+
+    const auto source = currentCode();
+    std::size_t lineOffset = 0;
+    std::size_t sourceLineCount = 0;
+    const bool lineMapped = findUniqueSourceLineOffset(
+        source, code, lineOffset, sourceLineCount);
+    {
+        std::lock_guard<std::mutex> lock(runtimeLogMutex_);
+        runtimeDiagnostic_ = {};
+        runSourceLineOffset_ = lineOffset;
+        runSourceLineCount_ = sourceLineCount;
+        runSourceMapped_ = lineMapped;
+    }
+    auto* editorView = dynamic_cast<VSTGUI::CView*>(
+        const_cast<VSTGUI::ITextEditor*>(codeEditor_));
+    if (editorView) editorView->invalid();
+
     auto message = Steinberg::owned(allocateMessage());
     if (!message) return false;
     message->setMessageID("SonicPi.RunCode");
@@ -968,20 +1240,19 @@ bool Controller::sendCurrentCode() {
     return codeEditor_ && sendRunCode(codeEditor_->getPlainText());
 }
 
-bool Controller::sendSelectedCode() {
-    if (!codeEditor_) return false;
+std::string Controller::selectedText() const {
+    if (!codeEditor_) return {};
     auto* editorView = dynamic_cast<VSTGUI::CView*>(
         const_cast<VSTGUI::ITextEditor*>(codeEditor_));
     auto* frame = editorView ? editorView->getFrame() : nullptr;
-    if (!frame) return false;
+    if (!frame) return {};
     const auto previousClipboard = frame->getClipboard();
-    if (!codeEditor_->handleCommand(VSTGUI::ITextEditor::Command::Copy)) {
-        return false;
-    }
+    const bool copied =
+        codeEditor_->handleCommand(VSTGUI::ITextEditor::Command::Copy);
     // Copy updates the clipboard, so capture the selected source first and
     // restore the user's previous clipboard contents immediately afterward.
-    const auto copiedSelection = frame->getClipboard();
-    std::string code;
+    const auto copiedSelection = copied ? frame->getClipboard() : nullptr;
+    std::string selected;
     if (copiedSelection) {
         for (std::uint32_t index = 0;
              index < copiedSelection->getCount(); ++index) {
@@ -990,17 +1261,39 @@ bool Controller::sendSelectedCode() {
             const auto size =
                 copiedSelection->getData(index, bytes, type);
             if (type == VSTGUI::IDataPackage::kText && bytes && size > 0) {
-                code.assign(static_cast<const char*>(bytes), size);
+                selected.assign(static_cast<const char*>(bytes), size);
                 break;
             }
         }
     }
     frame->setClipboard(previousClipboard);
-    return sendRunCode(code);
+    return selected;
+}
+
+bool Controller::sendSelectedCode() {
+    return sendRunCode(selectedText());
+}
+
+bool Controller::goToRuntimeError() {
+    const auto diagnostic = runtimeDiagnostic();
+    if (!codeEditor_ || !diagnostic.lineMapped ||
+        diagnostic.editorLine <= 0) {
+        return false;
+    }
+
+    const auto source = currentCode();
+    const auto line = sourceLineAt(
+        source, static_cast<std::size_t>(diagnostic.editorLine));
+    if (line.empty()) return false;
+
+    codeEditor_->handleCommand(VSTGUI::ITextEditor::Command::TakeFocus);
+    codeEditor_->setFindString(line);
+    return codeEditor_->handleCommand(
+        VSTGUI::ITextEditor::Command::FindNext);
 }
 
 std::string Controller::currentCode() const {
-    return codeEditor_ ? codeEditor_->getPlainText() : std::string{};
+    return codeEditor_ ? codeEditor_->getPlainText() : codeState_;
 }
 
 bool Controller::replaceCurrentCode(const std::string& code) {
@@ -1061,6 +1354,11 @@ std::string Controller::runtimeLog() const {
     return runtimeLog_;
 }
 
+RuntimeDiagnostic Controller::runtimeDiagnostic() const {
+    std::lock_guard<std::mutex> lock(runtimeLogMutex_);
+    return runtimeDiagnostic_;
+}
+
 Steinberg::tresult PLUGIN_API Controller::notify(
     Steinberg::Vst::IMessage* message) {
     if (!message) return Steinberg::kResultFalse;
@@ -1085,8 +1383,25 @@ Steinberg::tresult PLUGIN_API Controller::notify(
             attributes->getBinary("log", bytes, size) == Steinberg::kResultOk &&
             size <= 4096 && (size == 0 || bytes)) {
             std::lock_guard<std::mutex> lock(runtimeLogMutex_);
-            runtimeLog_.assign(
+            std::string nextLog(
                 size == 0 ? "" : static_cast<const char*>(bytes), size);
+            const auto appended = appendedLogText(runtimeLog_, nextLog);
+            runtimeLog_ = std::move(nextLog);
+            for (const auto& event : parseRuntimeErrorEvents(appended)) {
+                RuntimeDiagnostic diagnostic;
+                diagnostic.submittedLine = event.line;
+                diagnostic.message = event.message;
+                if (runSourceMapped_ &&
+                    runSourceLineOffset_ < runSourceLineCount_ &&
+                    static_cast<std::size_t>(event.line) <=
+                        runSourceLineCount_ - runSourceLineOffset_) {
+                    diagnostic.editorLine = static_cast<int>(
+                        runSourceLineOffset_ +
+                        static_cast<std::size_t>(event.line));
+                    diagnostic.lineMapped = true;
+                }
+                runtimeDiagnostic_ = std::move(diagnostic);
+            }
         }
         return Steinberg::kResultOk;
     }
@@ -1102,11 +1417,30 @@ void Controller::onTextEditorCreated(const VSTGUI::ITextEditor& editor) {
     style.cursorColor = VSTGUI::CColor(237, 240, 247, 255);
     style.frameColor = VSTGUI::CColor(52, 58, 70, 255);
     editor.setStyle(style);
-    editor.setPlainText(kStarterCode, true);
+    restoringCode_ = true;
+    editor.setPlainText(codeState_, true);
+    restoringCode_ = false;
+    syncCodeState();
 }
 
 void Controller::onTextEditorDestroyed(const VSTGUI::ITextEditor& editor) {
     if (codeEditor_ == &editor) codeEditor_ = nullptr;
+}
+
+void Controller::onTextEditorTextChanged(const VSTGUI::ITextEditor& editor) {
+    codeState_ = editor.getPlainText();
+    if (!restoringCode_) {
+        setDirty(true);
+        syncCodeState();
+    }
+    {
+        std::lock_guard<std::mutex> lock(runtimeLogMutex_);
+        runtimeDiagnostic_ = {};
+        runSourceMapped_ = false;
+    }
+    auto* editorView = dynamic_cast<VSTGUI::CView*>(
+        const_cast<VSTGUI::ITextEditor*>(codeEditor_));
+    if (editorView) editorView->invalid();
 }
 
 Steinberg::tresult PLUGIN_API Controller::queryInterface(
@@ -1117,11 +1451,27 @@ Steinberg::tresult PLUGIN_API Controller::queryInterface(
 void Controller::beginDraw(
     const VSTGUI::TextEditorColorization::IEditorExt& editor) {
     syntaxStyles_.clear();
+    errorStyleStart_ = 0;
+    errorStyleEnd_ = 0;
     const auto textLength = editor.getTextLength();
     if (textLength == 0) return;
 
-    editor.readText(0, textLength, [this](std::u32string_view text) {
+    const auto diagnostic = runtimeDiagnostic();
+    editor.readText(0, textLength, [this, diagnostic](std::u32string_view text) {
         syntaxStyles_ = tokenizeSonicPi(text);
+        if (!diagnostic.lineMapped || diagnostic.editorLine <= 0) return;
+
+        std::size_t lineStart = 0;
+        for (int line = 1; line < diagnostic.editorLine; ++line) {
+            const auto newline = text.find(U'\n', lineStart);
+            if (newline == std::u32string_view::npos) return;
+            lineStart = newline + 1;
+        }
+        if (lineStart >= text.size()) return;
+        const auto newline = text.find(U'\n', lineStart);
+        errorStyleStart_ = lineStart;
+        errorStyleEnd_ =
+            newline == std::u32string_view::npos ? text.size() : newline;
     });
 }
 
@@ -1162,7 +1512,35 @@ Controller::getStyles(
         result.push_back(
             Style{cursor, endOffset - cursor, kEditorTextColor});
     }
-    return result;
+
+    const auto errorStart = std::max(beginOffset, errorStyleStart_);
+    const auto errorEnd = std::min(endOffset, errorStyleEnd_);
+    if (errorStart >= errorEnd) return result;
+
+    VSTGUI::TextEditorColorization::IStyleProvider::Styles marked;
+    marked.reserve(result.size() + 2);
+    for (const auto& style : result) {
+        const auto styleEnd = style.start + style.length;
+        if (styleEnd <= errorStart || style.start >= errorEnd) {
+            marked.push_back(style);
+            continue;
+        }
+        if (style.start < errorStart) {
+            marked.push_back(
+                Style{style.start, errorStart - style.start, style.color});
+        }
+        const auto markedStart = std::max(style.start, errorStart);
+        const auto markedEnd = std::min(styleEnd, errorEnd);
+        if (markedStart < markedEnd) {
+            marked.push_back(
+                Style{markedStart, markedEnd - markedStart, kErrorColor});
+        }
+        if (styleEnd > errorEnd) {
+            marked.push_back(
+                Style{errorEnd, styleEnd - errorEnd, style.color});
+        }
+    }
+    return marked;
 }
 
 void Controller::endDraw(

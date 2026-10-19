@@ -56,6 +56,24 @@ Steinberg::tresult PLUGIN_API Processor::terminate() {
     return AudioEffect::terminate();
 }
 
+Steinberg::tresult PLUGIN_API Processor::getState(Steinberg::IBStream* state) {
+    std::string code;
+    {
+        std::lock_guard<std::mutex> lock(codeStateMutex_);
+        code = codeState_;
+    }
+    return writeCodeState(state, code)
+        ? Steinberg::kResultOk : Steinberg::kResultFalse;
+}
+
+Steinberg::tresult PLUGIN_API Processor::setState(Steinberg::IBStream* state) {
+    std::string code;
+    if (!readCodeState(state, code)) return Steinberg::kResultFalse;
+    std::lock_guard<std::mutex> lock(codeStateMutex_);
+    codeState_ = std::move(code);
+    return Steinberg::kResultOk;
+}
+
 Steinberg::tresult PLUGIN_API Processor::setupProcessing(
     Steinberg::Vst::ProcessSetup& setup) {
     const auto result = AudioEffect::setupProcessing(setup);
@@ -97,6 +115,21 @@ Steinberg::tresult PLUGIN_API Processor::notify(
     if (!message) return Steinberg::kResultFalse;
     const auto* messageId = message->getMessageID();
     if (!messageId) return Steinberg::kResultFalse;
+
+    if (std::strcmp(messageId, "SonicPi.EditorState") == 0) {
+        auto* attributes = message->getAttributes();
+        const void* bytes = nullptr;
+        Steinberg::uint32 size = 0;
+        if (!attributes ||
+            attributes->getBinary("code", bytes, size) != Steinberg::kResultOk ||
+            size > kMaxCodeStateBytes || (size > 0 && !bytes)) {
+            return Steinberg::kResultFalse;
+        }
+        std::lock_guard<std::mutex> lock(codeStateMutex_);
+        codeState_ = size ? std::string(static_cast<const char*>(bytes), size)
+                          : std::string{};
+        return Steinberg::kResultOk;
+    }
 
     if (std::strcmp(messageId, "SonicPi.RunCode") == 0) {
         auto* attributes = message->getAttributes();

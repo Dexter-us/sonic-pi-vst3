@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(sonic_pi_callback_spike VERSION 0.1.8 LANGUAGES C CXX)
+project(sonic_pi_callback_spike VERSION 0.1.10 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -246,4 +246,23 @@ smtg_target_add_plugin_resources(sonic_pi_vst3
     RESOURCES
         resource/sonic_pi.uidesc
 )
+
+# Explicit, headless host-state regression test. Does not activate audio/Ruby.
+if(WIN32 OR (UNIX AND NOT APPLE))
+    add_executable(sonic_pi_state_test EXCLUDE_FROM_ALL
+        tests/code_state_test.cpp
+        "${vst3sdk_SOURCE_DIR}/public.sdk/source/common/memorystream.cpp"
+    )
+    if(WIN32)
+        target_sources(sonic_pi_state_test PRIVATE
+            "${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/module_win32.cpp")
+    else()
+        target_sources(sonic_pi_state_test PRIVATE
+            "${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/module_linux.cpp")
+    endif()
+    target_include_directories(sonic_pi_state_test PRIVATE src/vst3)
+    target_compile_features(sonic_pi_state_test PRIVATE cxx_std_20)
+    target_link_libraries(sonic_pi_state_test PRIVATE sdk_hosting ${CMAKE_DL_LIBS})
+    add_dependencies(sonic_pi_state_test sonic_pi_vst3)
+endif()
 

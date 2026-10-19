@@ -4,13 +4,40 @@ This prototype combines the upstream Sonic Pi Ruby runtime with the
 SuperSonic/scsynth engine in a loadable VST3. Its VSTGUI editor contains a
 multi-line Sonic Pi code editor with Open/Save, syntax highlighting, Sonic Pi
 completion choices, reusable code snippets, buffer/selection execution, a
-`live_loop` picker, a runtime log panel, and Run/Stop controls. Ctrl+Space opens
-completions, Ctrl+Enter runs the buffer, Ctrl+Alt+Enter runs the selected code,
-and Ctrl+Shift+Enter stops all jobs. The Loops button lists complete
-`live_loop` blocks found in the current buffer. The log panel shows recent
-Spider runtime output and errors. The audio callback renders directly into the host's stereo output buffers;
+`live_loop` picker, runtime diagnostics, code help, and Run/Stop controls.
+Ctrl+Space opens completions, Ctrl+Enter runs the buffer, Ctrl+Alt+Enter runs
+the selected code, Ctrl+Shift+Enter stops all jobs, and Ctrl+Shift+Space opens
+code help. The Loops button lists complete `live_loop` blocks found in the
+current buffer. The log panel shows recent Spider runtime output and errors;
+reported error lines are highlighted, and Go to error navigates to the line
+when it can be matched to the current buffer. Select a Sonic Pi name and choose
+Docs to show its description and example. The audio callback renders directly
+into the host's stereo output buffers;
 a separate worker runs the Sonic Pi language runtime. It is registered as an
 Instrument/Synth by Dexter U.S., and the editor header carries the same branding.
+
+## DAW project state
+
+Version 0.1.10 embeds the current editor buffer in VST3 component and controller
+state, including code that has not been saved to an external `.rb` file. Saving
+and reopening a DAW project restores that code even if the editor was closed.
+Closing and reopening the plug-in editor also keeps the buffer.
+Restoration does **not** execute the code: press Run when ready.
+
+External absolute file paths are deliberately not stored in a project. Restored
+code appears as an Untitled buffer, and Save asks where to write a file. This
+keeps portable projects from accidentally overwriting a file on another machine.
+The host-state format is versioned, preserves UTF-8 and empty buffers, and rejects
+invalid/truncated state without replacing the existing code. The maximum saved
+buffer is 1 MiB; this does not change the runtime's smaller Run-message limit.
+This saves source code, not the Ruby heap, running jobs, or a live audio snapshot.
+
+Headless state regression check (after configuring CMake):
+
+```sh
+cmake --build build --target sonic_pi_state_test --parallel 2
+# Pass the generated VST3 bundle path to the sonic_pi_state_test executable.
+```
 
 ## Scope and current limitations
 

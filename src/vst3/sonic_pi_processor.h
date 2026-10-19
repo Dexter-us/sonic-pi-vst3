@@ -3,9 +3,11 @@
 
 #include "clockwork_embed.h"
 #include "sonic_pi_live_runtime.h"
+#include "sonic_pi_code_state.h"
 #include "public.sdk/source/vst/vstaudioeffect.h"
 
 #include <memory>
+#include <mutex>
 
 namespace SonicPiVst3 {
 
@@ -20,6 +22,8 @@ public:
 
     Steinberg::tresult PLUGIN_API initialize(Steinberg::FUnknown* context) override;
     Steinberg::tresult PLUGIN_API terminate() override;
+    Steinberg::tresult PLUGIN_API getState(Steinberg::IBStream* state) override;
+    Steinberg::tresult PLUGIN_API setState(Steinberg::IBStream* state) override;
     Steinberg::tresult PLUGIN_API setupProcessing(
         Steinberg::Vst::ProcessSetup& setup) override;
     Steinberg::tresult PLUGIN_API setActive(Steinberg::TBool state) override;
@@ -35,6 +39,9 @@ public:
         Steinberg::Vst::ProcessData& data) override;
 
 private:
+    // Never used in process(): host-state serialization stays off the audio path.
+    std::mutex codeStateMutex_;
+    std::string codeState_ = kStarterCode;
     bool startEngine() noexcept;
     void stopEngine() noexcept;
 
