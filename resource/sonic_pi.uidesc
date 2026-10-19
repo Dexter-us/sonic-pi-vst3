@@ -18,6 +18,8 @@
     <control-tag name="OpenCode" tag="1003"/>
     <control-tag name="SaveCode" tag="1004"/>
     <control-tag name="DocumentTitle" tag="1005"/>
+    <control-tag name="Complete" tag="1006"/>
+    <control-tag name="Snippets" tag="1007"/>
   </control-tags>
   <template background-color="Panel" class="CViewContainer" name="view"
             origin="0, 0" size="560, 420" minSize="560, 420" maxSize="560, 420"
@@ -26,7 +28,7 @@
           font="~ NormalFontBig"
           font-antialias="true" font-color="Text" frame-color="Border"
           frame-width="1" origin="18, 12" size="524, 42"
-          text-alignment="left" title="Dexter U.S. Sonic Pi v0.1.6 - Untitled"
+          text-alignment="left" title="Dexter U.S. Sonic Pi v0.1.7 - Untitled"
           transparent="false"/>
     <view back-color="Panel" class="CTextLabel" font="~ NormalFont"
           font-antialias="true" font-color="Muted" frame-color="Panel"
@@ -38,39 +40,55 @@
           origin="24, 88" size="512, 316" transparent="true"
           mouse-enabled="true">
       <view background-color="Editor" background-color-draw-style="filled"
-            bordered="false" class="CScrollView" container-size="512, 250"
-            horizontal-scrollbar="true" origin="0, 0" size="512, 250"
+            bordered="false" class="CScrollView" container-size="512, 232"
+            horizontal-scrollbar="true" origin="0, 0" size="512, 232"
             vertical-scrollbar="true" auto-hide-scrollbars="true"
             scrollbar-width="12" transparent="false">
         <view class="CView" custom-view-name="SonicPiTextEditor"
-              origin="0, 0" size="512, 250" transparent="false"
+              origin="0, 0" size="512, 232" transparent="false"
               mouse-enabled="true" wants-focus="true"/>
       </view>
       <view back-color="Border" class="CTextButton" control-tag="OpenCode"
             font="~ NormalFont" font-antialias="true" font-color="Text"
-            frame-color="Border" frame-width="1" origin="0, 266"
-            size="64, 38" text-alignment="center" title="Open"
+            frame-color="Border" frame-width="1" origin="0, 240"
+            size="54, 34" text-alignment="center" title="Open"
             transparent="false"/>
       <view back-color="Border" class="CTextButton" control-tag="SaveCode"
             font="~ NormalFont" font-antialias="true" font-color="Text"
-            frame-color="Border" frame-width="1" origin="70, 266"
-            size="64, 38" text-alignment="center" title="Save"
+            frame-color="Border" frame-width="1" origin="60, 240"
+            size="54, 34" text-alignment="center" title="Save"
+            transparent="false"/>
+      <view back-color="Border" class="CTextButton" control-tag="Complete"
+            font="~ NormalFont" font-antialias="true" font-color="Text"
+            frame-color="Border" frame-width="1" origin="120, 240"
+            size="78, 34" text-alignment="center" title="Complete"
+            transparent="false"/>
+      <view back-color="Border" class="CTextButton" control-tag="Snippets"
+            font="~ NormalFont" font-antialias="true" font-color="Text"
+            frame-color="Border" frame-width="1" origin="204, 240"
+            size="60, 34" text-alignment="center" title="Snips"
             transparent="false"/>
       <view back-color="Accent" class="CTextButton" control-tag="RunCode"
             font="~ NormalFont" font-antialias="true" font-color="Text"
-            frame-color="Accent" frame-width="1" origin="140, 266"
-            size="84, 38" text-alignment="center" title="Run"
+            frame-color="Accent" frame-width="1" origin="270, 240"
+            size="72, 34" text-alignment="center" title="Run"
             transparent="false"/>
       <view back-color="Border" class="CTextButton" control-tag="StopAll"
             font="~ NormalFont" font-antialias="true" font-color="Text"
-            frame-color="Border" frame-width="1" origin="230, 266"
-            size="84, 38" text-alignment="center" title="Stop"
+            frame-color="Border" frame-width="1" origin="348, 240"
+            size="72, 34" text-alignment="center" title="Stop"
             transparent="false"/>
       <view back-color="Panel" class="CTextLabel" control-tag="Status"
             font="~ NormalFontSmall" font-antialias="true"
             font-color="Muted" frame-color="Panel" frame-width="0"
-            origin="322, 275" size="190, 20" text-alignment="left"
+            origin="0, 280" size="512, 18" text-alignment="left"
             title="Waiting for VST activation..."
+            transparent="true"/>
+      <view back-color="Panel" class="CTextLabel"
+            font="~ NormalFontSmall" font-antialias="true"
+            font-color="Muted" frame-color="Panel" frame-width="0"
+            origin="0, 301" size="512, 14" text-alignment="left"
+            title="Ctrl+Space: complete   Ctrl+Enter: run   Ctrl+Shift+Enter: stop"
             transparent="true"/>
     </view>
   </template>

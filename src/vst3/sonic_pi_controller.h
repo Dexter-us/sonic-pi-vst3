@@ -8,6 +8,7 @@
 
 #include <atomic>
 #include <string>
+#include <string_view>
 
 namespace SonicPiVst3 {
 
@@ -36,6 +37,7 @@ public:
     bool sendRunCode(const std::string& code);
     std::string currentCode() const;
     bool replaceCurrentCode(const std::string& code);
+    bool insertTextAtCursor(std::string_view text);
     bool sendCurrentCode();
     bool sendStopAll();
     bool requestRuntimeStatus();

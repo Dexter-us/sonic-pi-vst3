@@ -4,8 +4,11 @@
 
 #include "pluginterfaces/vst/ivstmessage.h"
 #include "pluginterfaces/base/ustring.h"
+#include "vstgui/lib/cdropsource.h"
+#include "vstgui/lib/cframe.h"
 #include "vstgui/lib/cfileselector.h"
 #include "vstgui/lib/cvstguitimer.h"
+#include "vstgui/lib/controls/coptionmenu.h"
 #include "vstgui/uidescription/uiattributes.h"
 
 #include <algorithm>
@@ -15,6 +18,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -35,6 +39,8 @@ constexpr Steinberg::int32 kStatusTag = 1002;
 constexpr Steinberg::int32 kOpenCodeTag = 1003;
 constexpr Steinberg::int32 kSaveCodeTag = 1004;
 constexpr Steinberg::int32 kDocumentTitleTag = 1005;
+constexpr Steinberg::int32 kCompleteTag = 1006;
+constexpr Steinberg::int32 kSnippetsTag = 1007;
 
 const char* statusText(RuntimeStatus status) {
     switch (status) {
@@ -164,13 +170,63 @@ constexpr std::u32string_view kRubyLiterals[] = {
 };
 
 constexpr std::u32string_view kSonicPiBuiltins[] = {
-    U"at", U"choose", U"control", U"cue", U"dice", U"in_thread",
-    U"live_loop", U"look", U"play", U"play_chord", U"play_pattern",
-    U"play_pattern_timed", U"ring", U"rrand", U"rrand_i", U"sample",
-    U"set", U"sleep", U"sound", U"spread", U"stop", U"stop_all_jobs",
-    U"sync", U"tick", U"time_warp", U"use_bpm", U"use_cue_logging",
-    U"use_debug", U"use_osc_logging", U"use_random_seed", U"use_synth",
-    U"use_synth_defaults", U"with_bpm", U"with_fx", U"with_synth",
+    U"at", U"choose", U"control", U"cue", U"dice", U"define",
+    U"in_thread", U"live_loop", U"look", U"play", U"play_chord",
+    U"play_pattern", U"play_pattern_timed", U"ring", U"rrand",
+    U"rrand_i", U"sample", U"set", U"sleep", U"sound", U"spread",
+    U"stop", U"stop_all_jobs", U"sync", U"tick", U"time_warp",
+    U"use_bpm", U"use_cue_logging", U"use_debug", U"use_osc_logging",
+    U"use_random_seed", U"use_synth", U"use_synth_defaults", U"with_bpm",
+    U"with_fx", U"with_synth",
+};
+
+struct EditorChoice {
+    std::string_view label;
+    std::string_view insertion;
+};
+
+constexpr EditorChoice kCompletionChoices[] = {
+    {"play - play a note", "play"},
+    {"sample - play a sample", "sample"},
+    {"live_loop - repeating loop", "live_loop"},
+    {"with_fx - apply an effect", "with_fx"},
+    {"use_synth - select a synth", "use_synth"},
+    {"use_bpm - set tempo", "use_bpm"},
+    {"sleep - wait between events", "sleep"},
+    {"sync - wait for a cue", "sync"},
+    {"cue - send a cue", "cue"},
+    {"play_chord - play notes together", "play_chord"},
+    {"play_pattern_timed - timed note pattern", "play_pattern_timed"},
+    {"in_thread - start a thread", "in_thread"},
+    {"stop - stop a live loop", "stop"},
+    {"stop_all_jobs - stop all code", "stop_all_jobs"},
+    {"use_random_seed - repeat randomness", "use_random_seed"},
+    {":prophet - synth", ":prophet"},
+    {":tb303 - synth", ":tb303"},
+    {":saw - synth", ":saw"},
+    {":pulse - synth", ":pulse"},
+    {":fm - synth", ":fm"},
+    {":reverb - effect", ":reverb"},
+    {":echo - effect", ":echo"},
+    {":slicer - effect", ":slicer"},
+    {":wobble - effect", ":wobble"},
+    {":distortion - effect", ":distortion"},
+    {":bd_haus - sample", ":bd_haus"},
+    {":bd_tek - sample", ":bd_tek"},
+    {":drum_heavy_kick - sample", ":drum_heavy_kick"},
+    {":drum_snare_hard - sample", ":drum_snare_hard"},
+    {":drum_cymbal_closed - sample", ":drum_cymbal_closed"},
+    {":loop_amen - sample", ":loop_amen"},
+    {":ambi_lunar_land - sample", ":ambi_lunar_land"},
+};
+
+constexpr EditorChoice kSnippetChoices[] = {
+    {"Live loop", "live_loop :pulse do\n  play 60, amp: 0.5\n  sleep 1\nend\n"},
+    {"Synth and note", "use_synth :prophet\nplay 60, amp: 0.5\n"},
+    {"Effect block", "with_fx :reverb do\n  play 60\nend\n"},
+    {"Sample beat", "sample :bd_haus\nsleep 1\n"},
+    {"Timed note pattern", "play_pattern_timed [60, 64, 67], 0.25\n"},
+    {"Thread", "in_thread do\n  play 60\n  sleep 1\nend\n"},
 };
 
 template <std::size_t N>
@@ -299,12 +355,17 @@ constexpr char kStarterCode[] =
     "end";
 
 class LiveCodeSubController final : public VSTGUI::IController,
-                                    public VSTGUI::ViewListenerAdapter {
+                                    public VSTGUI::ViewListenerAdapter,
+                                    public VSTGUI::IKeyboardHook {
 public:
     explicit LiveCodeSubController(Controller* owner) : owner_(owner) {}
 
     ~LiveCodeSubController() override {
         statusTimer_ = nullptr;
+        if (keyboardFrame_) {
+            keyboardFrame_->unregisterKeyboardHook(this);
+            keyboardFrame_ = nullptr;
+        }
         detach(statusLabel_);
         detach(codeEditorView_);
     }
@@ -334,6 +395,11 @@ public:
             openCodeFile(control);
         } else if (control->getTag() == kSaveCodeTag) {
             saveCodeFile(control);
+        } else if (control->getTag() == kCompleteTag) {
+            showInsertMenu(control, kCompletionChoices,
+                           "Inserted completion");
+        } else if (control->getTag() == kSnippetsTag) {
+            showInsertMenu(control, kSnippetChoices, "Inserted snippet");
         } else if (control->getTag() == kRunCodeTag) {
             const bool sent = owner_->sendCurrentCode();
             showStatus(sent ? "Run request submitted..."
@@ -376,6 +442,10 @@ public:
             documentTitleLabel_ = nullptr;
         }
         if (view == codeEditorView_) {
+            if (keyboardFrame_) {
+                keyboardFrame_->unregisterKeyboardHook(this);
+                keyboardFrame_ = nullptr;
+            }
             codeEditorView_->unregisterViewListener(this);
             codeEditorView_ = nullptr;
         }
@@ -389,13 +459,98 @@ public:
                 500, true);
         }
         if (view == codeEditorView_) {
+            auto* frame = view->getFrame();
+            if (frame && frame != keyboardFrame_) {
+                if (keyboardFrame_) {
+                    keyboardFrame_->unregisterKeyboardHook(this);
+                }
+                keyboardFrame_ = frame;
+                keyboardFrame_->registerKeyboardHook(this);
+            }
             // The starter text is set during construction, before the host has
             // attached this view. Some hosts miss that first invalidation.
             view->invalid();
         }
     }
 
+    void onKeyboardEvent(VSTGUI::KeyboardEvent& event,
+                        VSTGUI::CFrame* frame) override {
+        if (event.consumed || event.type != VSTGUI::EventType::KeyDown ||
+            !frame || frame != keyboardFrame_ ||
+            frame->getFocusView() != codeEditorView_ ||
+            !event.modifiers.has(VSTGUI::ModifierKey::Control)) {
+            return;
+        }
+
+        if (event.virt == VSTGUI::VirtualKey::Space &&
+            event.modifiers.is(VSTGUI::ModifierKey::Control)) {
+            event.consumed = true;
+            showInsertMenu(codeEditorView_, kCompletionChoices,
+                           "Inserted completion");
+            return;
+        }
+
+        const bool enterKey = event.virt == VSTGUI::VirtualKey::Return ||
+                              event.virt == VSTGUI::VirtualKey::Enter;
+        if (!enterKey) return;
+
+        const bool stopShortcut = event.modifiers.is(
+            {VSTGUI::ModifierKey::Control, VSTGUI::ModifierKey::Shift});
+        const bool runShortcut =
+            event.modifiers.is(VSTGUI::ModifierKey::Control);
+        if (!runShortcut && !stopShortcut) return;
+
+        event.consumed = true;
+        if (stopShortcut) {
+            const bool sent = owner_->sendStopAll();
+            showStatus(sent ? "Stop requested..."
+                            : "Stop request failed; checking runtime status...");
+        } else {
+            const bool sent = owner_->sendCurrentCode();
+            showStatus(sent ? "Run request submitted..."
+                            : "Run request failed; checking runtime status...");
+        }
+    }
+
 private:
+    template <std::size_t N>
+    void showInsertMenu(VSTGUI::CView* anchor,
+                        const EditorChoice (&choices)[N],
+                        const char* insertedNotice) {
+        if (!anchor || !anchor->getFrame()) return;
+
+        auto menu = VSTGUI::makeOwned<VSTGUI::COptionMenu>();
+        menu->setStyle(VSTGUI::COptionMenu::kPopupStyle);
+        for (const auto& choice : choices) {
+            const std::string label(choice.label);
+            menu->addEntry(label.c_str());
+        }
+
+        VSTGUI::CPoint location(0, anchor->getViewSize().getHeight());
+        anchor->localToFrame(location);
+        std::array<std::string_view, N> insertions{};
+        for (std::size_t i = 0; i < N; ++i) {
+            insertions[i] = choices[i].insertion;
+        }
+        menu->popup(anchor->getFrame(), location,
+                    [this, insertions,
+                     insertedNotice = std::string(insertedNotice)](
+                        VSTGUI::COptionMenu* selected) {
+                        if (!selected) return;
+                        const auto index = selected->getLastResult();
+                        if (index < 0 ||
+                            static_cast<std::size_t>(index) >= N) {
+                            return;
+                        }
+                        if (owner_->insertTextAtCursor(
+                                insertions[static_cast<std::size_t>(index)])) {
+                            showNotice(insertedNotice);
+                        } else {
+                            showNotice("Could not insert text at the cursor");
+                        }
+                    });
+    }
+
     void refreshStatus() {
         if (!statusLabel_) return;
         owner_->requestRuntimeStatus();
@@ -501,6 +656,7 @@ private:
     VSTGUI::CTextLabel* statusLabel_ = nullptr;
     VSTGUI::CTextLabel* documentTitleLabel_ = nullptr;
     VSTGUI::CView* codeEditorView_ = nullptr;
+    VSTGUI::CFrame* keyboardFrame_ = nullptr;
     VSTGUI::SharedPointer<VSTGUI::CVSTGUITimer> statusTimer_;
     std::string currentFilePath_;
     std::string savedCode_ = kStarterCode;
@@ -563,6 +719,30 @@ std::string Controller::currentCode() const {
 
 bool Controller::replaceCurrentCode(const std::string& code) {
     return codeEditor_ && codeEditor_->setPlainText(code, true);
+}
+
+bool Controller::insertTextAtCursor(std::string_view text) {
+    if (!codeEditor_ || text.empty() ||
+        text.size() > std::numeric_limits<std::uint32_t>::max()) {
+        return false;
+    }
+
+    auto* editorView = dynamic_cast<VSTGUI::CView*>(
+        const_cast<VSTGUI::ITextEditor*>(codeEditor_));
+    auto* frame = editorView ? editorView->getFrame() : nullptr;
+    if (!frame) return false;
+
+    const auto previousClipboard = frame->getClipboard();
+    auto insertData = VSTGUI::CDropSource::create(
+        text.data(), static_cast<std::uint32_t>(text.size()),
+        VSTGUI::IDataPackage::kText);
+    if (!insertData) return false;
+
+    frame->setClipboard(insertData);
+    const bool inserted =
+        codeEditor_->handleCommand(VSTGUI::ITextEditor::Command::Paste);
+    frame->setClipboard(previousClipboard);
+    return inserted;
 }
 
 bool Controller::sendStopAll() {

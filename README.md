@@ -2,10 +2,12 @@
 
 This prototype combines the upstream Sonic Pi Ruby runtime with the
 SuperSonic/scsynth engine in a loadable VST3. Its VSTGUI editor contains a
-multi-line Sonic Pi code editor with Open/Save and Run/Stop controls. The audio callback
-renders directly into the host's stereo output buffers; a separate worker runs
-the Sonic Pi language runtime. It is registered as an Instrument/Synth by
-Dexter U.S., and the editor header carries the same branding.
+multi-line Sonic Pi code editor with Open/Save, syntax highlighting, Sonic Pi
+completion choices, reusable code snippets, and Run/Stop controls. Ctrl+Space
+opens completions, Ctrl+Enter runs the buffer, and Ctrl+Shift+Enter stops all
+jobs. The audio callback renders directly into the host's stereo output buffers;
+a separate worker runs the Sonic Pi language runtime. It is registered as an
+Instrument/Synth by Dexter U.S., and the editor header carries the same branding.
 
 ## Scope and current limitations
 
@@ -14,16 +16,21 @@ Dexter U.S., and the editor header carries the same branding.
   of the host.
 - There is no VST MIDI input or output path. MIDI-related Sonic Pi APIs are not
   bridged by this prototype.
+- Completion and snippet choices insert at the text cursor, replacing any
+  selected text. They are built into the plug-in and do not require Vim,
+  Neovim, or an external Sonic Pi CLI.
 - Sonic Pi's file-based buffer loads are decoded and copied into Clockwork
   buffers by the OSC adapter. The `supersonic-audio-out` device synth is not
   used; audio is delivered through the host's output buffers.
 - The embedded engine is process-global and the prototype allows only one
   active plug-in instance per host process.
-- The Windows build has passed the VST3 SDK validator and command-line audio
-  probes, but the plug-in still needs a real DAW installation and live-use test.
-  Its bundle contains Sonic Pi source/assets and a trimmed Ruby runtime. The
-  package excludes Ruby build tools, headers, documentation, test payloads, and
-  caches while retaining the interpreter, libraries, gems, and required DLLs. It also bundles a third-party notice summary and collected upstream license/copyright files.
+- The Linux build has been verified with the VST3 SDK validator and command-line
+  audio probes, but not in a DAW. The Windows package includes the Sonic Pi
+  source/assets and a trimmed Ruby runtime inside the VST3 bundle. It excludes
+  Ruby build tools, headers, documentation, tests, and caches while retaining
+  runtime libraries and DLLs. It also bundles a third-party notice summary and
+  collected upstream license/copyright files; it still needs a real DAW
+  installation and live-use test.
 
 ## Build and run
 
@@ -31,26 +38,24 @@ Requires CMake 3.25+, a C++20 compiler, Rust/Cargo, Git, and network access for
 the first configure/build. The build fetches pinned SuperSonic v0.91.0 and
 Steinberg VST3 SDK v3.8.1, including their required submodules. Ruby 3.2 must be
 available on `PATH` when building and validating the runtime. Windows builds use
-the Visual Studio 2022 x64 generator; the build script copies Ruby and the fetched
-Sonic Pi source/assets into the VST3 bundle, so an installed plug-in does not use
-the build machine's Ruby or source checkout. The bundled Ruby excludes MSYS2
-build tools, headers, documentation, test payloads, and package caches while
-retaining the interpreter, standard libraries, gems, and required DLLs.
+the Visual Studio 2022 x64 generator; the build script copies Ruby and the
+fetched Sonic Pi source/assets into the VST3 bundle, so the installed plug-in
+does not use the build machine's Ruby or source checkout.
 
 ```sh
-cmake -S . \
-      -B ./build \
+cmake -S native/sonic-pi-callback-spike \
+      -B native/sonic-pi-callback-spike/build \
       -DCMAKE_BUILD_TYPE=Release
-cmake --build ./build \
+cmake --build native/sonic-pi-callback-spike/build \
       --target sonic_pi_vst3 sonic_pi_live_probe sonic_pi_render_probe --parallel 2
-./build/sonic_pi_live_probe
+native/sonic-pi-callback-spike/build/sonic_pi_live_probe
 mkdir -p generated-artifacts
-./build/sonic_pi_render_probe \
+native/sonic-pi-callback-spike/build/sonic_pi_render_probe \
   generated-artifacts/sonic-pi-host-buffer-test.wav 2
 ```
 
 The VST3 bundle is built at
-`./build/VST3/Release/sonic_pi_vst3.vst3` on Linux.
+`native/sonic-pi-callback-spike/build/VST3/Release/sonic_pi_vst3.vst3` on Linux.
 The plug-in build runs the VST3 SDK validator. The live probe starts the same
 Ruby runtime and embedded engine as the plug-in, runs a Sonic Pi `play` command,
 and checks that the host-owned audio buffers contain sound. The render probe
@@ -60,12 +65,14 @@ For a Windows x64 build from a Visual Studio Developer PowerShell:
 
 ```powershell
 powershell -ExecutionPolicy Bypass `
-  -File .\scripts\windows-build.ps1
+  -File .\native\sonic-pi-callback-spike\scripts\windows-build.ps1
 ```
 
-The GitHub Actions workflow builds and validates the Windows package, then uploads
-the self-contained `.vst3` bundle as a downloadable artifact. The runtime is stored
-at `Contents/Resources/SonicPiVstRuntime`; its `README.txt` lists the bundled
+The same build runs through `.github/workflows/windows-build.yml` on pushes,
+pull requests, or manual dispatch. The workflow runs the VST3 validator and both
+audio probes against the packaged runtime, then uploads the self-contained
+`.vst3` bundle as a downloadable Actions artifact. On Windows the runtime is at
+`Contents/Resources/SonicPiVstRuntime`; its `README.txt` records the bundled
 versions, `THIRD_PARTY_NOTICES.txt` summarizes included components, and
 `Licenses/FILE_INDEX.txt` maps collected upstream legal notices to their
 original locations.
