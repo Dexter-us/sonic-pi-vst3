@@ -30,6 +30,7 @@ try {
     $env:SONIC_PI_VST_ALLOW_BUILD_TREE_RUNTIME = "1"
     cmake --build $buildRoot --config Release `
         --target sonic_pi_vst3 sonic_pi_live_probe sonic_pi_render_probe `
+            sonic_pi_state_test sonic_pi_generator_test sonic_pi_generator_editor_test `
         --parallel 2
     if ($LASTEXITCODE -ne 0) {
         throw "The Windows VST3 build or SDK validator failed."
@@ -322,6 +323,8 @@ Set-Content -LiteralPath (Join-Path $runtimeRoot "README.txt") `
     -Value $runtimeManifest -Encoding utf8
 Copy-Item -LiteralPath (Join-Path $projectRoot "THIRD_PARTY_NOTICES.txt") `
     -Destination (Join-Path $runtimeRoot "THIRD_PARTY_NOTICES.txt") -Force
+Copy-Item -LiteralPath (Join-Path $projectRoot "GENERATORS.md") `
+    -Destination (Join-Path (Split-Path $runtimeRoot -Parent) "GENERATORS.md") -Force
 
 $liveProbe = Join-Path $buildRoot "Release\sonic_pi_live_probe.exe"
 if (-not (Test-Path -LiteralPath $liveProbe -PathType Leaf)) {
@@ -332,6 +335,21 @@ $previousPath = $env:PATH
 try {
     $env:SONIC_PI_VST_RUNTIME_ROOT = $runtimeRoot
     $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+    $stateTest = Join-Path $buildRoot "Release\sonic_pi_state_test.exe"
+    & $stateTest $pluginBundle
+    if ($LASTEXITCODE -ne 0) {
+        throw "The VST3 code/generator state recovery test failed."
+    }
+    $generatorTest = Join-Path $buildRoot "Release\sonic_pi_generator_test.exe"
+    & $generatorTest $bundledRuby
+    if ($LASTEXITCODE -ne 0) {
+        throw "The bundled Ruby generator worker test failed."
+    }
+    $generatorEditorTest = Join-Path $buildRoot "Release\sonic_pi_generator_editor_test.exe"
+    & $generatorEditorTest $bundledRuby
+    if ($LASTEXITCODE -ne 0) {
+        throw "The Ruby generator preview/editor test failed."
+    }
     & $liveProbe
     if ($LASTEXITCODE -ne 0) {
         throw "The bundled Sonic Pi runtime failed the live audio probe."

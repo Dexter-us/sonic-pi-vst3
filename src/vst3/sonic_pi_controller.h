@@ -16,6 +16,8 @@
 
 namespace SonicPiVst3 {
 
+enum class EditorMode { code, generator, preview };
+
 struct RuntimeDiagnostic {
     int editorLine = 0;
     int submittedLine = 0;
@@ -39,7 +41,21 @@ public:
     Steinberg::tresult PLUGIN_API setState(Steinberg::IBStream* state) override;
     Steinberg::tresult PLUGIN_API setComponentState(
         Steinberg::IBStream* state) override;
-    bool takeRestoredCode(std::string& code);
+    bool takeRestoredState(EditorState& state);
+    EditorMode editorMode() const { return editorMode_; }
+    std::string currentEditorText() const;
+    std::string generatorSource() const { return generatorSource_; }
+    bool setEditorMode(EditorMode mode);
+    bool replaceActiveText(const std::string& text);
+    bool startGenerator(GeneratorOptions options = {});
+    void cancelGenerator() { generator_.cancel(); }
+    bool generatorRunning() const { return generator_.running(); }
+    std::optional<GeneratorResult> pollGenerator();
+    bool hasGeneratorPreview() const { return generatorPreviewValid_; }
+    bool applyGeneratorPreview(bool replace);
+    bool undoGeneratorApply();
+    const std::string& generatorMessage() const { return generatorMessage_; }
+    const std::string& bufferWarning() const { return bufferWarning_; }
     VSTGUI::CView* createCustomView(
         VSTGUI::UTF8StringPtr name,
         const VSTGUI::UIAttributes& attributes,
@@ -85,8 +101,20 @@ public:
 
 private:
     bool syncCodeState();
+    void configureEditorStyle();
     std::string codeState_ = kStarterCode;
-    std::optional<std::string> restoredCodeForUi_;
+    std::string generatorSource_ = kStarterGenerator;
+    std::string generatorPreview_;
+    std::string generatorMessage_ = "Trusted Ruby only: full file access, not a sandbox.";
+    std::string bufferWarning_;
+    std::optional<std::string> codeBeforeGenerator_;
+    std::string codeAfterGenerator_;
+    std::optional<EditorState> restoredStateForUi_;
+    EditorMode editorMode_ = EditorMode::code;
+    RubyGenerator generator_;
+    std::size_t generatorRevision_ = 0;
+    std::size_t generatorRequestRevision_ = 0;
+    bool generatorPreviewValid_ = false;
     bool restoringCode_ = false;
     const VSTGUI::ITextEditor* codeEditor_ = nullptr;
     VSTGUI::TextEditorColorization::IStyleProvider::Styles syntaxStyles_;

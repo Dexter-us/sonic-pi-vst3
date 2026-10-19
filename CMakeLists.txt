@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(sonic_pi_callback_spike VERSION 0.1.10 LANGUAGES C CXX)
+project(sonic_pi_callback_spike VERSION 0.1.11 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -217,9 +217,16 @@ if(WIN32)
     target_link_libraries(sonic_pi_live_runtime PUBLIC ws2_32)
 endif()
 
+find_package(Threads REQUIRED)
+add_library(sonic_pi_generator STATIC src/vst3/sonic_pi_generator.cpp)
+target_include_directories(sonic_pi_generator PUBLIC src/vst3)
+target_compile_features(sonic_pi_generator PUBLIC cxx_std_20)
+target_link_libraries(sonic_pi_generator PUBLIC Threads::Threads)
+
 smtg_add_vst3plugin(sonic_pi_vst3
     src/vst3/plugin_entry.cpp
     src/vst3/sonic_pi_editor.cpp
+    src/vst3/sonic_pi_generator_editor.cpp
     src/vst3/sonic_pi_processor.cpp
 )
 if(APPLE)
@@ -241,6 +248,7 @@ target_link_libraries(sonic_pi_vst3 PRIVATE
     vstgui_support
     clockwork_bundle
     sonic_pi_live_runtime
+    sonic_pi_generator
 )
 smtg_target_add_plugin_resources(sonic_pi_vst3
     RESOURCES
@@ -248,6 +256,22 @@ smtg_target_add_plugin_resources(sonic_pi_vst3
 )
 
 # Explicit, headless host-state regression test. Does not activate audio/Ruby.
+add_executable(sonic_pi_generator_test EXCLUDE_FROM_ALL tests/generator_test.cpp)
+target_link_libraries(sonic_pi_generator_test PRIVATE sonic_pi_generator)
+
+add_executable(sonic_pi_generator_editor_test EXCLUDE_FROM_ALL
+    tests/generator_editor_test.cpp
+    src/vst3/sonic_pi_editor.cpp
+    src/vst3/sonic_pi_generator_editor.cpp
+    "${vst3sdk_SOURCE_DIR}/public.sdk/source/common/memorystream.cpp"
+    "${vst3sdk_SOURCE_DIR}/public.sdk/source/main/moduleinit.cpp"
+    "${vst3sdk_SOURCE_DIR}/public.sdk/source/main/pluginfactory.cpp"
+)
+target_include_directories(sonic_pi_generator_editor_test PRIVATE
+    src/vst3 "${SMTG_VSTGUI_SOURCE_DIR}")
+target_link_libraries(sonic_pi_generator_editor_test PRIVATE
+    sdk sdk_hosting vstgui_support sonic_pi_generator)
+
 if(WIN32 OR (UNIX AND NOT APPLE))
     add_executable(sonic_pi_state_test EXCLUDE_FROM_ALL
         tests/code_state_test.cpp
@@ -256,6 +280,7 @@ if(WIN32 OR (UNIX AND NOT APPLE))
     if(WIN32)
         target_sources(sonic_pi_state_test PRIVATE
             "${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/module_win32.cpp")
+    target_link_libraries(sonic_pi_state_test PRIVATE ole32 shell32 uuid)
     else()
         target_sources(sonic_pi_state_test PRIVATE
             "${vst3sdk_SOURCE_DIR}/public.sdk/source/vst/hosting/module_linux.cpp")

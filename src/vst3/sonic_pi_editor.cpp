@@ -53,6 +53,14 @@ constexpr Steinberg::int32 kRuntimeLogTag = 1010;
 constexpr Steinberg::int32 kGoToErrorTag = 1011;
 constexpr Steinberg::int32 kCodeHelpLabelTag = 1012;
 constexpr Steinberg::int32 kCodeHelpTag = 1013;
+constexpr Steinberg::int32 kCodeViewTag = 1014;
+constexpr Steinberg::int32 kGeneratorViewTag = 1015;
+constexpr Steinberg::int32 kPreviewViewTag = 1016;
+constexpr Steinberg::int32 kGenerateTag = 1017;
+constexpr Steinberg::int32 kAppendGeneratedTag = 1018;
+constexpr Steinberg::int32 kReplaceGeneratedTag = 1019;
+constexpr Steinberg::int32 kUndoGeneratedTag = 1020;
+constexpr Steinberg::int32 kEditorModeTag = 1021;
 
 const char* statusText(RuntimeStatus status) {
     switch (status) {
@@ -655,6 +663,9 @@ public:
             keyboardFrame_ = nullptr;
         }
         detach(statusLabel_);
+        detach(documentTitleLabel_);
+        detach(runtimeLogLabel_);
+        detach(editorModeLabel_);
         detach(helpLabel_);
         detach(codeEditorView_);
     }
@@ -680,7 +691,27 @@ public:
         // controlEndEdit, so dispatch actions while the clicked value is high.
         if (!control || control->getValueNormalized() <= 0.5f) return;
 
-        if (control->getTag() == kOpenCodeTag) {
+        if (control->getTag() == kCodeViewTag) {
+            switchEditor(EditorMode::code);
+        } else if (control->getTag() == kGeneratorViewTag) {
+            switchEditor(EditorMode::generator);
+        } else if (control->getTag() == kPreviewViewTag) {
+            switchEditor(EditorMode::preview);
+        } else if (control->getTag() == kGenerateTag) {
+            generateOrCancel(control);
+        } else if (control->getTag() == kAppendGeneratedTag) {
+            showNotice(owner_->applyGeneratorPreview(false)
+                ? "Generated source appended. Press Run when ready."
+                : "Generate a non-empty preview first; combined code must fit 32000 bytes.");
+            refreshGeneratorUi();
+        } else if (control->getTag() == kReplaceGeneratedTag) {
+            showReplaceMenu(control);
+        } else if (control->getTag() == kUndoGeneratedTag) {
+            showNotice(owner_->undoGeneratorApply()
+                ? "Generator change undone (press again to redo)."
+                : "No unchanged generator edit to undo; later edits are protected.");
+            refreshGeneratorUi();
+        } else if (control->getTag() == kOpenCodeTag) {
             openCodeFile(control);
         } else if (control->getTag() == kSaveCodeTag) {
             saveCodeFile(control);
@@ -690,6 +721,10 @@ public:
         } else if (control->getTag() == kSnippetsTag) {
             showInsertMenu(control, kSnippetChoices, "Inserted snippet");
         } else if (control->getTag() == kRunSelectionTag) {
+            if (owner_->editorMode() != EditorMode::code) {
+                showNotice("Switch to Code before running a selection.");
+                return;
+            }
             const bool sent = owner_->sendSelectedCode();
             showStatus(sent ? "Selected code sent to Sonic Pi"
                             : "Select code in the editor first");
@@ -702,6 +737,10 @@ public:
         } else if (control->getTag() == kCodeHelpTag) {
             showCodeHelpMenu(control);
         } else if (control->getTag() == kRunCodeTag) {
+            if (owner_->editorMode() != EditorMode::code) {
+                showNotice("Switch to Code before running Sonic Pi.");
+                return;
+            }
             const bool sent = owner_->sendCurrentCode();
             showStatus(sent ? "Run request submitted..."
                             : "Run request failed; checking runtime status...");
@@ -719,7 +758,10 @@ public:
         const VSTGUI::UIAttributes&,
         const VSTGUI::IUIDescription*) override {
         if (auto* label = dynamic_cast<VSTGUI::CTextLabel*>(view)) {
-            if (label->getTag() == kStatusTag) {
+            if (label->getTag() == kEditorModeTag) {
+                editorModeLabel_ = label;
+                label->registerViewListener(this);
+            } else if (label->getTag() == kStatusTag) {
                 statusLabel_ = label;
                 statusLabel_->registerViewListener(this);
                 statusLabel_->setText("Waiting for VST activation...");
@@ -743,6 +785,10 @@ public:
     }
 
     void viewWillDelete(VSTGUI::CView* view) override {
+        if (view == editorModeLabel_) {
+            editorModeLabel_->unregisterViewListener(this);
+            editorModeLabel_ = nullptr;
+        }
         if (view == statusLabel_) {
             statusTimer_ = nullptr;
             statusLabel_->unregisterViewListener(this);
@@ -830,6 +876,14 @@ public:
         if (!selectionShortcut && !runShortcut && !stopShortcut) return;
 
         event.consumed = true;
+        if (!stopShortcut && owner_->editorMode() != EditorMode::code) {
+            if (runShortcut && owner_->editorMode() == EditorMode::generator) {
+                generateOrCancel(codeEditorView_);
+            } else {
+                showNotice("Switch to Code before running Sonic Pi.");
+            }
+            return;
+        }
         if (selectionShortcut) {
             const bool sent = owner_->sendSelectedCode();
             showStatus(sent ? "Selected code sent to Sonic Pi"
@@ -846,6 +900,96 @@ public:
     }
 
 private:
+    void switchEditor(EditorMode mode) {
+        if (!owner_->setEditorMode(mode)) {
+            showNotice("Could not switch editor buffers");
+            return;
+        }
+        refreshGeneratorUi();
+        refreshDocumentTitle();
+        refreshRuntimeLog();
+    }
+
+    void refreshGeneratorUi() {
+        const auto mode = owner_->editorMode();
+        if (editorModeLabel_) {
+            const char* text = owner_->generatorRunning() ? "Working" :
+                mode == EditorMode::code ? "CODE" :
+                mode == EditorMode::generator ? "SCRIPT" :
+                owner_->hasGeneratorPreview() ? "OUTPUT" : "PREVIEW";
+            editorModeLabel_->setText(text);
+        }
+        if (lastMode_ != mode) {
+            lastMode_ = mode;
+            if (helpLabel_) helpLabel_->setText(
+                mode == EditorMode::code
+                    ? "Select a Sonic Pi name and choose Docs for its help."
+                    : mode == EditorMode::generator
+                    ? "Trusted Ruby only: full file access, NOT a sandbox.\nFinal expression: String. Ctrl+Enter generates; Gen/Cancel stops."
+                    : "Read-only output. Append/Replace edits Code only; Run is separate.\nUndo gen is available until you make later code edits.");
+        }
+    }
+
+    void generateOrCancel(VSTGUI::CView* anchor) {
+        // Consume pending project restoration before consulting session consent.
+        refreshDocumentTitle();
+        if (owner_->generatorRunning()) {
+            owner_->cancelGenerator();
+            showNotice("Cancelling Ruby generator...");
+            return;
+        }
+        if (!anchor || !anchor->getFrame()) return;
+        const auto script = owner_->generatorSource();
+        if (trustedScript_ && script == *trustedScript_) {
+            showNotice(owner_->startGenerator()
+                ? "Generating; Gen/Cancel stops the worker."
+                : "Could not start the generator worker");
+            return;
+        }
+        if (helpLabel_) helpLabel_->setText(
+            "WARNING: Ruby can read/write files and run commands.\nNot a sandbox. Run only scripts you trust.");
+        auto menu = VSTGUI::makeOwned<VSTGUI::COptionMenu>();
+        menu->setStyle(VSTGUI::COptionMenu::kPopupStyle);
+        menu->addEntry("Run this trusted Ruby script (full file access)");
+        menu->addEntry("Cancel");
+        VSTGUI::CPoint location(0, anchor->getViewSize().getHeight());
+        anchor->localToFrame(location);
+        menu->popup(anchor->getFrame(), location,
+            [this, script](VSTGUI::COptionMenu* selected) {
+                if (!selected || selected->getLastResult() != 0) return;
+                if (script != owner_->generatorSource()) {
+                    showNotice("Script changed; review it before generating.");
+                    return;
+                }
+                trustedScript_ = script;
+                showNotice(owner_->startGenerator()
+                    ? "Generating; Gen/Cancel stops the worker."
+                    : "Could not start the generator worker");
+            });
+    }
+
+    void showReplaceMenu(VSTGUI::CView* anchor) {
+        if (!owner_->hasGeneratorPreview() || owner_->generatorRunning()) {
+            showNotice("Generate a successful non-empty preview first.");
+            return;
+        }
+        if (!anchor || !anchor->getFrame()) return;
+        auto menu = VSTGUI::makeOwned<VSTGUI::COptionMenu>();
+        menu->setStyle(VSTGUI::COptionMenu::kPopupStyle);
+        menu->addEntry("Replace Sonic Pi code with this preview");
+        menu->addEntry("Cancel");
+        VSTGUI::CPoint location(0, anchor->getViewSize().getHeight());
+        anchor->localToFrame(location);
+        menu->popup(anchor->getFrame(), location,
+            [this](VSTGUI::COptionMenu* selected) {
+                if (!selected || selected->getLastResult() != 0) return;
+                showNotice(owner_->applyGeneratorPreview(true)
+                    ? "Code replaced. Undo gen restores it; Run is separate."
+                    : "Preview is empty/stale or exceeds the source limit.");
+                refreshGeneratorUi();
+            });
+    }
+
     void showCodeHelpMenu(VSTGUI::CView* anchor) {
         if (!anchor || !anchor->getFrame()) return;
 
@@ -964,12 +1108,30 @@ private:
 
     void refreshStatus() {
         if (!statusLabel_) return;
+        if (const auto result = owner_->pollGenerator()) {
+            showNotice(result->success
+                ? (result->output.empty() ? "Empty output: no code changed."
+                                         : "Generated preview ready; code has not changed.")
+                : result->cancelled ? "Generation cancelled; code unchanged."
+                                    : "Generator failed; Preview shows the error.");
+        }
+        refreshGeneratorUi();
         owner_->requestRuntimeStatus();
         owner_->requestRuntimeLog();
         refreshDocumentTitle();
         refreshRuntimeLog();
         if (std::chrono::steady_clock::now() < noticeUntil_) {
             showStatus(noticeText_.c_str());
+            return;
+        }
+        if (!owner_->bufferWarning().empty()) {
+            showStatus(owner_->bufferWarning().c_str());
+            return;
+        }
+        if (owner_->editorMode() != EditorMode::code) {
+            showStatus(owner_->generatorRunning()
+                ? "Generating in Ruby; Gen/Cancel stops it (5 second limit)."
+                : owner_->generatorMessage().substr(0, 92).c_str());
             return;
         }
         const auto diagnostic = owner_->runtimeDiagnostic();
@@ -992,6 +1154,13 @@ private:
     }
 
     void refreshRuntimeLog() {
+        if (owner_->editorMode() != EditorMode::code) {
+            if (runtimeLogLabel_) {
+                runtimeLogLabel_->setText(owner_->generatorMessage().c_str());
+            }
+            runtimeLogText_.clear();
+            return;
+        }
         const auto diagnostic = owner_->runtimeDiagnostic();
         std::string diagnosticKey = std::to_string(diagnostic.editorLine);
         diagnosticKey += "/";
@@ -1013,22 +1182,29 @@ private:
 
     void refreshDocumentTitle() {
         if (!documentTitleLabel_) return;
-        std::string restored;
-        if (owner_->takeRestoredCode(restored)) {
-            savedCode_ = std::move(restored);
+        EditorState restored;
+        if (owner_->takeRestoredState(restored)) {
+            savedCode_ = std::move(restored.code);
+            savedGenerator_ = std::move(restored.generator);
             // A DAW project is portable; never silently overwrite an external
             // file at an absolute path saved on another computer.
             currentFilePath_.clear();
+            generatorFilePath_.clear();
+            trustedScript_.reset();
         }
-        const auto code = owner_->currentCode();
-        const bool dirty = code != savedCode_;
+        const bool script = owner_->editorMode() == EditorMode::generator;
+        const bool preview = owner_->editorMode() == EditorMode::preview;
+        const auto code = owner_->currentEditorText();
+        const bool dirty = !preview && code != (script ? savedGenerator_ : savedCode_);
         std::string title = "Dexter U.S. Sonic Pi v";
         title += kPluginVersion;
-        title += " - ";
+        title += preview ? " - Preview (read-only)" :
+                 script ? " - Generator: " : " - Code: ";
         if (dirty) title += "*";
-        title += currentFilePath_.empty()
+        const auto& path = script ? generatorFilePath_ : currentFilePath_;
+        if (!preview) title += path.empty()
                      ? "Untitled"
-                     : fileNameFromUtf8Path(currentFilePath_);
+                     : fileNameFromUtf8Path(path);
         documentTitleLabel_->setText(title.c_str());
     }
 
@@ -1040,13 +1216,21 @@ private:
     }
 
     bool hasUnsavedChanges() const {
-        return owner_->currentCode() != savedCode_;
+        return owner_->currentEditorText() !=
+            (owner_->editorMode() == EditorMode::generator ? savedGenerator_ : savedCode_);
     }
 
     bool saveCodeFile(VSTGUI::CControl* control) {
         refreshDocumentTitle();
-        const auto code = owner_->currentCode();
-        std::string path = currentFilePath_;
+        if (owner_->editorMode() == EditorMode::preview) {
+            showNotice("Append or Replace first, then save from Code.");
+            return false;
+        }
+        const bool script = owner_->editorMode() == EditorMode::generator;
+        const auto code = owner_->currentEditorText();
+        auto& activePath = script ? generatorFilePath_ : currentFilePath_;
+        auto& saved = script ? savedGenerator_ : savedCode_;
+        std::string path = activePath;
         if (path.empty()) path = chooseCodeFile(control, true);
         if (path.empty()) return false;
         if (!writeCodeFile(path, code)) {
@@ -1054,15 +1238,20 @@ private:
             return false;
         }
 
-        currentFilePath_ = std::move(path);
-        savedCode_ = code;
+        activePath = std::move(path);
+        saved = code;
         refreshDocumentTitle();
-        showNotice("Saved " + fileNameFromUtf8Path(currentFilePath_));
+        showNotice("Saved " + fileNameFromUtf8Path(activePath));
         return true;
     }
 
     void openCodeFile(VSTGUI::CControl* control) {
         refreshDocumentTitle();
+        if (owner_->editorMode() == EditorMode::preview) {
+            showNotice("Switch to Code or Script before opening a file.");
+            return;
+        }
+        const bool script = owner_->editorMode() == EditorMode::generator;
         const auto path = chooseCodeFile(control, false);
         if (path.empty()) return;
 
@@ -1089,15 +1278,15 @@ private:
             showNotice("Could not read code file");
             return;
         }
-        if (!owner_->replaceCurrentCode(code)) {
+        if (!owner_->replaceActiveText(code)) {
             showNotice("Could not load code into editor");
             return;
         }
 
-        currentFilePath_ = path;
-        savedCode_ = std::move(code);
+        (script ? generatorFilePath_ : currentFilePath_) = path;
+        (script ? savedGenerator_ : savedCode_) = std::move(code);
         refreshDocumentTitle();
-        showNotice("Loaded " + fileNameFromUtf8Path(currentFilePath_));
+        showNotice("Loaded " + fileNameFromUtf8Path(path));
     }
 
     void detach(VSTGUI::CView* view) {
@@ -1115,11 +1304,16 @@ private:
     VSTGUI::CTextLabel* documentTitleLabel_ = nullptr;
     VSTGUI::CTextLabel* runtimeLogLabel_ = nullptr;
     VSTGUI::CTextLabel* helpLabel_ = nullptr;
+    VSTGUI::CTextLabel* editorModeLabel_ = nullptr;
     VSTGUI::CView* codeEditorView_ = nullptr;
     VSTGUI::CFrame* keyboardFrame_ = nullptr;
     VSTGUI::SharedPointer<VSTGUI::CVSTGUITimer> statusTimer_;
     std::string currentFilePath_;
     std::string savedCode_ = kStarterCode;
+    std::string generatorFilePath_;
+    std::string savedGenerator_ = kStarterGenerator;
+    std::optional<std::string> trustedScript_;
+    std::optional<EditorMode> lastMode_;
     std::string runtimeLogText_;
     std::string runtimeDiagnosticKey_;
     std::string noticeText_;
@@ -1130,54 +1324,6 @@ private:
 
 Controller::~Controller() {
     if (codeEditor_) codeEditor_->resetController();
-}
-
-Steinberg::tresult PLUGIN_API Controller::getState(Steinberg::IBStream* state) {
-    return writeCodeState(state, currentCode())
-        ? Steinberg::kResultOk : Steinberg::kResultFalse;
-}
-
-Steinberg::tresult PLUGIN_API Controller::setState(Steinberg::IBStream* state) {
-    std::string code;
-    if (!readCodeState(state, code)) return Steinberg::kResultFalse;
-    if (codeEditor_ && codeEditor_->getPlainText() != code) {
-        restoringCode_ = true;
-        const bool restored = codeEditor_->setPlainText(code, true);
-        restoringCode_ = false;
-        if (!restored) return Steinberg::kResultFalse;
-    }
-    codeState_ = std::move(code);
-    restoredCodeForUi_ = codeState_;
-    syncCodeState();
-    return Steinberg::kResultOk;
-}
-
-Steinberg::tresult PLUGIN_API Controller::setComponentState(
-    Steinberg::IBStream* state) {
-    return setState(state);
-}
-
-bool Controller::takeRestoredCode(std::string& code) {
-    if (!restoredCodeForUi_) return false;
-    code = std::move(*restoredCodeForUi_);
-    restoredCodeForUi_.reset();
-    return true;
-}
-
-bool Controller::syncCodeState() {
-    if (codeState_.size() > kMaxCodeStateBytes) return false;
-    auto message = Steinberg::owned(allocateMessage());
-    if (!message) return false;
-    message->setMessageID("SonicPi.EditorState");
-    auto* attributes = message->getAttributes();
-    if (!attributes ||
-        attributes->setBinary(
-            "code", codeState_.data(),
-            static_cast<Steinberg::uint32>(codeState_.size())) !=
-            Steinberg::kResultOk) {
-        return false;
-    }
-    return sendMessage(message) == Steinberg::kResultOk;
 }
 
 Steinberg::IPlugView* PLUGIN_API Controller::createView(const char* name) {
@@ -1210,7 +1356,8 @@ VSTGUI::IController* Controller::createSubController(
 }
 
 bool Controller::sendRunCode(const std::string& code) {
-    if (code.empty() || code.size() > 32000) return false;
+    if (editorMode_ != EditorMode::code ||
+        code.empty() || code.size() > kMaxGeneratorOutputBytes) return false;
 
     const auto source = currentCode();
     std::size_t lineOffset = 0;
@@ -1275,6 +1422,7 @@ bool Controller::sendSelectedCode() {
 }
 
 bool Controller::goToRuntimeError() {
+    if (editorMode_ != EditorMode::code) return false;
     const auto diagnostic = runtimeDiagnostic();
     if (!codeEditor_ || !diagnostic.lineMapped ||
         diagnostic.editorLine <= 0) {
@@ -1293,15 +1441,16 @@ bool Controller::goToRuntimeError() {
 }
 
 std::string Controller::currentCode() const {
-    return codeEditor_ ? codeEditor_->getPlainText() : codeState_;
+    return codeState_;
 }
 
 bool Controller::replaceCurrentCode(const std::string& code) {
-    return codeEditor_ && codeEditor_->setPlainText(code, true);
+    if (!setEditorMode(EditorMode::code)) return false;
+    return replaceActiveText(code);
 }
 
 bool Controller::insertTextAtCursor(std::string_view text) {
-    if (!codeEditor_ || text.empty() ||
+    if (editorMode_ == EditorMode::preview || !codeEditor_ || text.empty() ||
         text.size() > std::numeric_limits<std::uint32_t>::max()) {
         return false;
     }
@@ -1410,30 +1559,43 @@ Steinberg::tresult PLUGIN_API Controller::notify(
 
 void Controller::onTextEditorCreated(const VSTGUI::ITextEditor& editor) {
     codeEditor_ = &editor;
-    VSTGUI::ITextEditor::Style style;
-    style.font = VSTGUI::makeOwned<VSTGUI::CFontDesc>("Consolas", 16);
-    style.textColor = VSTGUI::CColor(237, 240, 247, 255);
-    style.backColor = VSTGUI::CColor(16, 19, 25, 255);
-    style.cursorColor = VSTGUI::CColor(237, 240, 247, 255);
-    style.frameColor = VSTGUI::CColor(52, 58, 70, 255);
-    editor.setStyle(style);
-    restoringCode_ = true;
-    editor.setPlainText(codeState_, true);
-    restoringCode_ = false;
+    setEditorMode(editorMode_);
     syncCodeState();
 }
 
 void Controller::onTextEditorDestroyed(const VSTGUI::ITextEditor& editor) {
-    if (codeEditor_ == &editor) codeEditor_ = nullptr;
+    if (codeEditor_ == &editor) {
+        generator_.cancel();
+        codeEditor_ = nullptr;
+    }
 }
 
 void Controller::onTextEditorTextChanged(const VSTGUI::ITextEditor& editor) {
-    codeState_ = editor.getPlainText();
-    if (!restoringCode_) {
-        setDirty(true);
-        syncCodeState();
+    if (restoringCode_ || editorMode_ == EditorMode::preview) return;
+    const auto text = editor.getPlainText();
+    const auto limit = editorMode_ == EditorMode::generator
+        ? kMaxGeneratorSourceBytes : kMaxCodeStateBytes;
+    if (text.size() > limit) {
+        bufferWarning_ = editorMode_ == EditorMode::generator
+            ? "Edit rejected: generator scripts must fit in 64 KiB."
+            : "Edit rejected: source buffers must fit in 1 MiB.";
+        restoringCode_ = true;
+        editor.setPlainText(currentEditorText(), true);
+        restoringCode_ = false;
+        return;
     }
-    {
+    bufferWarning_.clear();
+    if (editorMode_ == EditorMode::generator) {
+        generatorSource_ = text;
+        ++generatorRevision_;
+        generatorPreviewValid_ = false;
+        generatorMessage_ = "Script changed. Generate again before applying output.";
+    } else {
+        codeState_ = text;
+    }
+    setDirty(true);
+    syncCodeState();
+    if (editorMode_ == EditorMode::code) {
         std::lock_guard<std::mutex> lock(runtimeLogMutex_);
         runtimeDiagnostic_ = {};
         runSourceMapped_ = false;
@@ -1456,7 +1618,8 @@ void Controller::beginDraw(
     const auto textLength = editor.getTextLength();
     if (textLength == 0) return;
 
-    const auto diagnostic = runtimeDiagnostic();
+    const auto diagnostic = editorMode_ == EditorMode::code
+        ? runtimeDiagnostic() : RuntimeDiagnostic{};
     editor.readText(0, textLength, [this, diagnostic](std::u32string_view text) {
         syntaxStyles_ = tokenizeSonicPi(text);
         if (!diagnostic.lineMapped || diagnostic.editorLine <= 0) return;

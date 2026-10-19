@@ -26,15 +26,26 @@
     <control-tag name="GoToError" tag="1011"/>
     <control-tag name="CodeHelpLabel" tag="1012"/>
     <control-tag name="CodeHelp" tag="1013"/>
+    <control-tag name="CodeView" tag="1014"/>
+    <control-tag name="GeneratorView" tag="1015"/>
+    <control-tag name="PreviewView" tag="1016"/>
+    <control-tag name="Generate" tag="1017"/>
+    <control-tag name="AppendGenerated" tag="1018"/>
+    <control-tag name="ReplaceGenerated" tag="1019"/>
+    <control-tag name="UndoGenerated" tag="1020"/>
+    <control-tag name="EditorMode" tag="1021"/>
   </control-tags>
   <template background-color="Panel" class="CViewContainer" name="view"
             origin="0, 0" size="560, 420" minSize="560, 420" maxSize="560, 420"
             transparent="false" mouse-enabled="true">
+    <view class="CViewContainer" sub-controller="LiveCodeController"
+          origin="0, 0" size="560, 420" transparent="true"
+          mouse-enabled="true">
     <view back-color="Panel" class="CTextLabel" control-tag="DocumentTitle"
           font="~ NormalFontBig"
           font-antialias="true" font-color="Text" frame-color="Border"
           frame-width="1" origin="18, 12" size="524, 42"
-            text-alignment="left" title="Dexter U.S. Sonic Pi v0.1.9 - Untitled"
+            text-alignment="left" title="Dexter U.S. Sonic Pi v0.1.11 - Code: Untitled"
           transparent="false"/>
     <view back-color="Panel" class="CTextLabel" font="~ NormalFont"
           font-antialias="true" font-color="Muted" frame-color="Panel"
@@ -42,16 +53,40 @@
           text-alignment="left"
           title="Sonic Pi live-coding instrument  /  Audio output"
           transparent="true"/>
-    <view class="CViewContainer" sub-controller="LiveCodeController"
+    <view class="CViewContainer"
           origin="24, 78" size="512, 342" transparent="true"
           mouse-enabled="true">
+      <view class="CTextButton" control-tag="CodeView" origin="0, 0" size="50, 24"
+            font="~ NormalFontSmall" title="Code" back-color="Border"
+            font-color="Text" frame-color="Border"/>
+      <view class="CTextButton" control-tag="GeneratorView" origin="54, 0" size="54, 24"
+            font="~ NormalFontSmall" title="Script" back-color="Border"
+            font-color="Text" frame-color="Border"/>
+      <view class="CTextButton" control-tag="PreviewView" origin="112, 0" size="64, 24"
+            font="~ NormalFontSmall" title="Preview" back-color="Border"
+            font-color="Text" frame-color="Border"/>
+      <view class="CTextButton" control-tag="Generate" origin="180, 0" size="82, 24"
+            font="~ NormalFontSmall" title="Gen/Cancel" back-color="Accent"
+            font-color="Text" frame-color="Accent"/>
+      <view class="CTextButton" control-tag="AppendGenerated" origin="266, 0" size="60, 24"
+            font="~ NormalFontSmall" title="Append" back-color="Border"
+            font-color="Text" frame-color="Border"/>
+      <view class="CTextButton" control-tag="ReplaceGenerated" origin="330, 0" size="64, 24"
+            font="~ NormalFontSmall" title="Replace" back-color="Border"
+            font-color="Text" frame-color="Border"/>
+      <view class="CTextButton" control-tag="UndoGenerated" origin="398, 0" size="58, 24"
+            font="~ NormalFontSmall" title="Undo gen" back-color="Border"
+            font-color="Text" frame-color="Border"/>
+      <view class="CTextLabel" control-tag="EditorMode" origin="460, 2" size="52, 20"
+            font="~ NormalFontSmall" title="CODE" font-color="Muted"
+            back-color="Panel" frame-color="Panel" transparent="true"/>
       <view background-color="Editor" background-color-draw-style="filled"
-              bordered="false" class="CScrollView" container-size="512, 160"
-              horizontal-scrollbar="true" origin="0, 0" size="512, 160"
+              bordered="false" class="CScrollView" container-size="512, 130"
+              horizontal-scrollbar="true" origin="0, 30" size="512, 130"
             vertical-scrollbar="true" auto-hide-scrollbars="true"
             scrollbar-width="12" transparent="false">
         <view class="CView" custom-view-name="SonicPiTextEditor"
-                origin="0, 0" size="512, 160" transparent="false"
+                origin="0, 0" size="512, 130" transparent="false"
               mouse-enabled="true" wants-focus="true"/>
       </view>
       <view back-color="Border" class="CTextButton" control-tag="OpenCode"
@@ -109,7 +144,7 @@
             font="~ NormalFontSmall" font-antialias="true"
             font-color="Muted" frame-color="Panel" frame-width="0"
             origin="0, 227" size="400, 14" text-alignment="left"
-            title="Sonic Pi runtime output / errors"
+            title="Sonic Pi / Ruby generator output and errors"
             transparent="true"/>
       <view back-color="Border" class="CTextButton" control-tag="GoToError"
             font="~ NormalFontSmall" font-antialias="true" font-color="Text"
@@ -126,7 +161,7 @@
             font="~ NormalFontSmall" font-antialias="true"
             font-color="Muted" frame-color="Panel" frame-width="0"
             origin="0, 286" size="512, 14" text-alignment="left"
-            title="Ctrl+Enter run   Ctrl+Shift+Enter stop   Ctrl+Alt+Enter selection   Ctrl+Shift+Space docs"
+            title="Ctrl+Enter run (Code) / generate (Script)    Ctrl+Shift+Enter stop audio"
             transparent="true"/>
       <view back-color="Editor" class="CMultiLineTextLabel"
             control-tag="CodeHelpLabel" font="~ NormalFontSmall"
@@ -135,6 +170,7 @@
             text-alignment="left"
             title="Select a Sonic Pi name and choose Docs for its help."
             transparent="false"/>
+    </view>
     </view>
   </template>
 </vstgui-ui-description>

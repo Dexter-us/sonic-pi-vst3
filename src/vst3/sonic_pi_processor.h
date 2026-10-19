@@ -41,7 +41,7 @@ public:
 private:
     // Never used in process(): host-state serialization stays off the audio path.
     std::mutex codeStateMutex_;
-    std::string codeState_ = kStarterCode;
+    EditorState codeState_;
     bool startEngine() noexcept;
     void stopEngine() noexcept;
 

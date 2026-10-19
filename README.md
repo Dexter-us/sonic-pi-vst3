@@ -1,5 +1,10 @@
 # Dexter U.S. Sonic Pi VST3 live-coding instrument
 
+**v0.1.11:** trusted Ruby code generators now have separate Script and read-only
+Preview views, explicit Append/Replace and generator-edit undo. Both source
+buffers are saved with the DAW project; generation never starts playback.
+See [GENERATORS.md](GENERATORS.md) for the workflow, limits and trust warning.
+
 This prototype combines the upstream Sonic Pi Ruby runtime with the
 SuperSonic/scsynth engine in a loadable VST3. Its VSTGUI editor contains a
 multi-line Sonic Pi code editor with Open/Save, syntax highlighting, Sonic Pi

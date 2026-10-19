@@ -57,18 +57,18 @@ Steinberg::tresult PLUGIN_API Processor::terminate() {
 }
 
 Steinberg::tresult PLUGIN_API Processor::getState(Steinberg::IBStream* state) {
-    std::string code;
+    EditorState code;
     {
         std::lock_guard<std::mutex> lock(codeStateMutex_);
         code = codeState_;
     }
-    return writeCodeState(state, code)
+    return writeEditorState(state, code)
         ? Steinberg::kResultOk : Steinberg::kResultFalse;
 }
 
 Steinberg::tresult PLUGIN_API Processor::setState(Steinberg::IBStream* state) {
-    std::string code;
-    if (!readCodeState(state, code)) return Steinberg::kResultFalse;
+    EditorState code;
+    if (!readEditorState(state, code)) return Steinberg::kResultFalse;
     std::lock_guard<std::mutex> lock(codeStateMutex_);
     codeState_ = std::move(code);
     return Steinberg::kResultOk;
@@ -119,15 +119,23 @@ Steinberg::tresult PLUGIN_API Processor::notify(
     if (std::strcmp(messageId, "SonicPi.EditorState") == 0) {
         auto* attributes = message->getAttributes();
         const void* bytes = nullptr;
+        const void* scriptBytes = nullptr;
         Steinberg::uint32 size = 0;
+        Steinberg::uint32 scriptSize = 0;
         if (!attributes ||
             attributes->getBinary("code", bytes, size) != Steinberg::kResultOk ||
-            size > kMaxCodeStateBytes || (size > 0 && !bytes)) {
+            attributes->getBinary("generator", scriptBytes, scriptSize) !=
+                Steinberg::kResultOk ||
+            size > kMaxCodeStateBytes || (size > 0 && !bytes) ||
+            scriptSize > kMaxGeneratorSourceBytes || (scriptSize > 0 && !scriptBytes)) {
             return Steinberg::kResultFalse;
         }
         std::lock_guard<std::mutex> lock(codeStateMutex_);
-        codeState_ = size ? std::string(static_cast<const char*>(bytes), size)
-                          : std::string{};
+        codeState_.code = size ? std::string(static_cast<const char*>(bytes), size)
+                               : std::string{};
+        codeState_.generator = scriptSize
+            ? std::string(static_cast<const char*>(scriptBytes), scriptSize)
+            : std::string{};
         return Steinberg::kResultOk;
     }
 

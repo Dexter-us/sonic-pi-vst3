@@ -33,6 +33,13 @@ std::string read(MemoryStream& stream) {
     return code;
 }
 
+EditorState readFull(MemoryStream& stream) {
+    rewind(stream);
+    EditorState state;
+    require(readEditorState(&stream, state), "Could not decode editor state");
+    return state;
+}
+
 void testCodec() {
     for (const auto& code : std::vector<std::string>{
              kStarterCode, "", "# Unicode: café 音楽\nplay 72\n",
@@ -66,6 +73,29 @@ void testCodec() {
     require(!writeCodeState(nullptr, ""), "Null output stream was accepted");
     std::string unchanged = "keep this";
     require(!readCodeState(nullptr, unchanged), "Null input stream was accepted");
+    rewind(valid);
+    const auto migrated = readFull(valid);
+    require(migrated.code == kStarterCode && migrated.generator == kStarterGenerator,
+            "Old project state did not migrate to the default generator");
+    for (const auto& state : std::vector<EditorState>{
+             {"play 72\n", "# café 音楽\n'play 65\\n'"},
+             {"", ""}, {kStarterCode, kStarterGenerator}}) {
+        MemoryStream stream;
+        require(writeEditorState(&stream, state), "Could not save both buffers");
+        require(readFull(stream) == state, "Generator source was lost from state");
+        const std::string data(stream.getData(), stream.getSize());
+        for (std::size_t size = 0; size < data.size(); ++size) {
+            MemoryStream broken(const_cast<char*>(data.data()), size);
+            EditorState kept{"keep code", "keep generator"};
+            require(!readEditorState(&broken, kept) &&
+                    kept == EditorState{"keep code", "keep generator"},
+                    "Truncated generator state replaced existing buffers");
+        }
+    }
+    MemoryStream tooLarge;
+    require(!writeEditorState(
+                &tooLarge, {"play 60", std::string(kMaxGeneratorSourceBytes + 1, ' ')}),
+            "Oversized generator source was saved");
 }
 
 void testPlugin(const char* path) {
@@ -87,21 +117,22 @@ void testPlugin(const char* path) {
     processorPoint->connect(controllerPoint);
     controllerPoint->connect(processorPoint);
 
-    for (const auto& code : std::vector<std::string>{
-             "use_bpm 123\n# session-only code 音\nplay 67\n", ""}) {
+    for (const auto& state : std::vector<EditorState>{
+             {"use_bpm 123\n# session-only code 音\nplay 67\n", "'play 67\\n'"},
+             {"", ""}}) {
         MemoryStream source;
-        require(writeCodeState(&source, code), "Could not prepare host state");
+        require(writeEditorState(&source, state), "Could not prepare host state");
         rewind(source);
         require(controller->setState(&source) == kResultOk,
                 "Controller refused host state");
         MemoryStream controllerSaved;
         require(controller->getState(&controllerSaved) == kResultOk,
                 "Controller state save failed with editor closed");
-        require(read(controllerSaved) == code, "Controller lost session code");
+        require(readFull(controllerSaved) == state, "Controller lost session buffers");
         MemoryStream processorSaved;
         require(processor->getState(&processorSaved) == kResultOk,
                 "Processor state save failed");
-        require(read(processorSaved) == code,
+        require(readFull(processorSaved) == state,
                 "Editor state did not reach the processor");
 
         // Restore into a fresh processor/controller, without opening a GUI or
@@ -123,10 +154,10 @@ void testPlugin(const char* path) {
         MemoryStream restored;
         require(restoredController->getState(&restored) == kResultOk,
                 "Restored controller save failed");
-        require(read(restored) == code, "New controller lost restored code");
+        require(readFull(restored) == state, "New controller lost restored buffers");
         MemoryStream restoredComponent;
         require(restoredProcessor->getState(&restoredComponent) == kResultOk &&
-                    read(restoredComponent) == code,
+                    readFull(restoredComponent) == state,
                 "New processor lost restored code");
 
         // Invalid state must not replace already-restored session contents.
@@ -136,7 +167,7 @@ void testPlugin(const char* path) {
                 "Controller accepted corrupt state");
         MemoryStream stillRestored;
         require(restoredController->getState(&stillRestored) == kResultOk &&
-                    read(stillRestored) == code,
+                    readFull(stillRestored) == state,
                 "Corrupt state destroyed session contents");
         restoredController->terminate();
         restoredProcessor->terminate();
