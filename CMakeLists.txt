@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.24)
-project(sonic_pi_callback_spike VERSION 0.1.11 LANGUAGES C CXX)
+project(sonic_pi_callback_spike VERSION 0.1.12 LANGUAGES C CXX)
+if(MSVC)
+    add_compile_options(/utf-8)
+    # The SDK selects char8_t filesystem conversions using __cplusplus.
+    # /std:c++20 alone leaves that macro at 199711L in MSVC.
+    add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:/Zc:__cplusplus>")
+endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -198,7 +204,18 @@ target_compile_definitions(sonic_pi_render_probe PRIVATE
     SONIC_PI_BEEP_SYNTHDEF="${supersonic_SOURCE_DIR}/packages/supersonic-scsynth-synthdefs/synthdefs/sonic-pi-beep.scsyndef"
 )
 
+find_package(Threads REQUIRED)
+add_library(sonic_pi_portable STATIC src/vst3/sonic_pi_portable.cpp)
+target_include_directories(sonic_pi_portable PUBLIC src/vst3)
+target_compile_features(sonic_pi_portable PUBLIC cxx_std_20)
+target_link_libraries(sonic_pi_portable PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
+if(WIN32)
+    target_link_libraries(sonic_pi_portable PUBLIC shell32)
+endif()
+
 add_executable(sonic_pi_live_probe src/live_runtime_probe.cpp)
+target_compile_definitions(sonic_pi_live_probe PRIVATE
+    SONIC_PI_PLUGIN_VERSION="${PROJECT_VERSION}")
 target_link_libraries(sonic_pi_live_probe PRIVATE
     clockwork_bundle
     sonic_pi_live_runtime
@@ -212,7 +229,7 @@ target_include_directories(sonic_pi_live_runtime PUBLIC src/vst3)
 target_compile_definitions(sonic_pi_live_runtime PRIVATE
     SONIC_PI_ROOT_DIRECTORY="${sonic_pi_runtime_SOURCE_DIR}"
 )
-target_link_libraries(sonic_pi_live_runtime PRIVATE clockwork_bundle)
+target_link_libraries(sonic_pi_live_runtime PRIVATE clockwork_bundle PUBLIC sonic_pi_portable)
 if(WIN32)
     target_link_libraries(sonic_pi_live_runtime PUBLIC ws2_32)
 endif()
@@ -249,6 +266,7 @@ target_link_libraries(sonic_pi_vst3 PRIVATE
     clockwork_bundle
     sonic_pi_live_runtime
     sonic_pi_generator
+    sonic_pi_portable
 )
 smtg_target_add_plugin_resources(sonic_pi_vst3
     RESOURCES
@@ -270,7 +288,16 @@ add_executable(sonic_pi_generator_editor_test EXCLUDE_FROM_ALL
 target_include_directories(sonic_pi_generator_editor_test PRIVATE
     src/vst3 "${SMTG_VSTGUI_SOURCE_DIR}")
 target_link_libraries(sonic_pi_generator_editor_test PRIVATE
-    sdk sdk_hosting vstgui_support sonic_pi_generator)
+    sdk sdk_hosting vstgui_support sonic_pi_generator sonic_pi_portable)
+
+add_executable(sonic_pi_portable_test EXCLUDE_FROM_ALL tests/portable_test.cpp)
+target_link_libraries(sonic_pi_portable_test PRIVATE sonic_pi_portable)
+
+add_custom_command(TARGET sonic_pi_vst3 POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/portable"
+        "$<TARGET_FILE_DIR:sonic_pi_vst3>/../.."
+    VERBATIM)
 
 if(WIN32 OR (UNIX AND NOT APPLE))
     add_executable(sonic_pi_state_test EXCLUDE_FROM_ALL

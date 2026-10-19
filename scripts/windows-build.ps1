@@ -31,6 +31,7 @@ try {
     cmake --build $buildRoot --config Release `
         --target sonic_pi_vst3 sonic_pi_live_probe sonic_pi_render_probe `
             sonic_pi_state_test sonic_pi_generator_test sonic_pi_generator_editor_test `
+            sonic_pi_portable_test `
         --parallel 2
     if ($LASTEXITCODE -ne 0) {
         throw "The Windows VST3 build or SDK validator failed."
@@ -350,7 +351,13 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "The Ruby generator preview/editor test failed."
     }
-    & $liveProbe
+    $portableTest = Join-Path $buildRoot "Release\sonic_pi_portable_test.exe"
+    & $portableTest
+    if ($LASTEXITCODE -ne 0) {
+        throw "Portable file, folder relocation or safe-save checks failed."
+    }
+    & $liveProbe --snips (Join-Path $pluginBundle "Snips") `
+        (Join-Path $pluginBundle "Help\snippet-checks.html")
     if ($LASTEXITCODE -ne 0) {
         throw "The bundled Sonic Pi runtime failed the live audio probe."
     }

@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Dexter U.S. Sonic Pi — Editor Help</title>
+<style>
+:root{color-scheme:dark;--bg:#11151c;--panel:#1c2430;--line:#354254;--text:#edf1f7;--muted:#b8c5d6;--accent:#81d9d0}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.65 system-ui,sans-serif}
+header,main,footer{max-width:980px;margin:auto;padding:28px}header{padding-top:56px;border-bottom:1px solid var(--line)}
+h1{font-size:clamp(30px,5vw,46px);line-height:1.15;margin:12px 0}h2{margin-top:44px;line-height:1.3}h3{margin-top:26px}
+p,li{max-width:80ch}.eyebrow{color:var(--accent);letter-spacing:.1em;font-size:13px;text-transform:uppercase}
+.lead{font-size:19px;color:var(--muted)}a{color:var(--accent)}a:focus-visible{outline:3px solid var(--accent);outline-offset:4px}
+nav{display:flex;flex-wrap:wrap;gap:12px 22px;margin:24px 0}nav a{font-weight:600}section{scroll-margin-top:20px}
+pre,code,kbd{font-family:ui-monospace,Consolas,monospace}pre{background:#0c1016;border:1px solid var(--line);padding:18px;white-space:pre-wrap;overflow-wrap:anywhere;border-radius:8px}
+code,kbd{background:var(--panel);padding:2px 5px;border-radius:4px}pre code{background:none;padding:0}
+.note{border-left:4px solid var(--accent);background:var(--panel);padding:16px 20px;margin:24px 0}.warning{border-color:#f2c66d}
+table{width:100%;border-collapse:collapse;margin:18px 0}th,td{text-align:left;vertical-align:top;border-bottom:1px solid var(--line);padding:12px}th{color:var(--accent)}
+details{background:var(--panel);padding:16px 20px;margin:12px 0;border-radius:8px}summary{cursor:pointer;font-weight:600}
+footer{border-top:1px solid var(--line);font-size:14px;color:var(--muted)}@media(max-width:600px){header,main,footer{padding:22px}td,th{padding:9px 6px}table{font-size:14px}}
+@media print{body{background:white;color:black}a{color:#12554b}pre,code,kbd,.note,details{background:#f1f3f5;color:black}nav{display:none}h2{break-after:avoid}footer{color:#333}}
+</style>
+</head>
+<body>
+<header>
+<span class="eyebrow">Dexter U.S. · Sonic Pi VST3 · v0.1.12</span>
+<h1>Editor help</h1>
+<p class="lead">Live-code Sonic Pi, reuse snippets, and generate code. Everything you need stays with the portable plug-in folder.</p>
+<nav aria-label="Guide sections"><a href="#start">Start</a><a href="#snips">Snips</a><a href="#files">Files &amp; portability</a><a href="#generators">Generators</a><a href="#controls">Controls</a><a href="#keys">Keys</a><a href="#trouble">Troubleshooting</a></nav>
+</header>
+<main>
+<section id="start"><h2>1. Start making sound</h2>
+<ol><li>Load the complete <code>sonic_pi_vst3.vst3</code> folder as an instrument in your host.</li>
+<li>Activate the host’s audio engine and connect the instrument’s stereo output to the host output.</li>
+<li>Wait for the Sonic Pi ready message, choose <strong>Code</strong>, and enter a program.</li>
+<li>Choose <strong>Run</strong>. Choose <strong>Stop</strong> to stop its jobs.</li></ol>
+<pre><code>use_bpm 110
+
+live_loop :pulse do
+  play 60, amp: 0.5
+  sleep 1
+end</code></pre>
+<p>The instrument uses its own Sonic Pi clock. It does not synchronize to the DAW tempo or transport, and these editor features do not add MIDI routing.</p>
+<div class="note">Opening a saved DAW project restores source text, not playback. Press Run when you are ready.</div>
+</section>
+<section id="snips"><h2>2. Reuse snippets without losing code</h2>
+<p>The <strong>Snippets</strong> button opens the portable <strong>Snips</strong> tool. Every time you open its menu, it reads the <code>Snips</code> folder again. Add or edit a UTF-8 <code>.rb</code> or <code>.txt</code> file there, then reopen the menu. No restart is needed.</p>
+<ol><li>Choose <strong>Code</strong>.</li><li>Open <strong>Snippets</strong>, then select <strong>Append: filename</strong>.</li><li>The file is appended at the end, separated by a blank line. Existing source is kept even if you had selected all the text.</li><li>Review the combined program, rename any duplicate live loops, then choose Run separately.</li></ol>
+<p><strong>Undo last snip append</strong> restores the source from before the latest append. It refuses to discard manual changes made afterwards. The folder menu also opens the Snips directory and the bundled check report.</p>
+<p>The six supplied files cover a live loop, a synth/note, reverb, a drum sample, a timed note pattern and a thread. The Windows packaging check executes every snippet in the shipped Snips folder against that package’s Sonic Pi runtime, checks for runtime errors and verifies non-silent audio. Its results and exact tested source are written to <code>Help/snippet-checks.html</code>.</p>
+<div class="note warning">The report applies to the source that was tested at build time. Files you add or edit later are <strong>not automatically run or certified</strong>. Snippets are Ruby/Sonic Pi code and can access files or perform other actions. Review unfamiliar snippets before running them.</div>
+<p>The menu supports up to 128 top-level files. Subfolders and symbolic links are not loaded. Empty snippets and additions that exceed the 32,000-byte Run limit are rejected without changing your source. Snips append only in Code view, never into a generator or preview.</p>
+</section>
+<section id="files"><h2>3. Files and portable folders</h2>
+<pre>sonic_pi_vst3.vst3/
+├── Contents/             Plug-in binary and bundled runtime
+├── Snips/                Reusable Sonic Pi .rb / .txt snippets
+├── Files/
+│   ├── Code/             Your Sonic Pi source files
+│   └── Generators/       Your trusted Ruby generator scripts
+├── Help/
+│   ├── editor.html       This offline guide
+│   └── snippet-checks.html
+└── RuntimeData/          Runtime logs and Sonic Pi user configuration</pre>
+<p><strong>Open</strong> and <strong>Save</strong> use <code>Files/Code</code> in Code view and <code>Files/Generators</code> in Script view. Subdirectories are supported. To import an existing file, copy it into the appropriate portable directory first. Choosing a path outside that directory is rejected instead of silently creating a dependency elsewhere.</p>
+<p>Save writes to a temporary file in the destination directory and replaces the original only after the write succeeds. The title shows an asterisk when the active buffer differs from its last external-file save. Open warns before replacing unsaved source.</p>
+<h3>Moving or upgrading</h3>
+<ul><li>Put the whole <code>.vst3</code> folder in a location your user account can write to, such as a portable plug-in directory. A protected system folder can prevent saves or runtime startup.</li>
+<li>Close the host, then copy the <strong>whole folder</strong> to the new machine or drive. Do not copy just the binary under Contents.</li>
+<li>Back up Files and Snips before replacing or upgrading the plug-in bundle. Your DAW project and portable folder are separate backups.</li>
+<li>The editor resolves these folders from the plug-in’s current location. It does not save an installation drive letter or use AppData for its runtime home.</li>
+<li>Absolute paths or external samples you write into your own Ruby code are your responsibility. Copy that data and update those paths when moving.</li></ul>
+<h3>DAW state versus external files</h3>
+<p>Saving the DAW project embeds both the Code and Script buffers. Restoring it does not run code, restore active jobs, keep previews, or restore trust approval. External Save destinations are cleared after project restore: choose a destination again. Older code-only states load with the starter generator. Preview cannot be opened over or saved directly; apply its output to Code first.</p>
+<p>Older versions used an AppData/home runtime folder. Existing external files are not deleted or migrated automatically. Copy the source or configuration you want into this portable setup yourself.</p>
+</section>
+<section id="generators"><h2>4. Ruby code generators</h2>
+<p><strong>Script</strong> is a separate Ruby buffer. The script’s final expression must return a String containing Sonic Pi source. <code>puts</code> and <code>warn</code> are diagnostics, not generated code.</p>
+<pre><code>bpm = 120
+notes = [60, 64, 67, 72]
+steps = notes.map { |n| "  play #{n}, amp: 0.4\n  sleep 0.25" }
+"use_bpm #{bpm}\n\nlive_loop :generated do\n#{steps.join("\n")}\nend\n"</code></pre>
+<ol><li>Choose Script, edit or open a trusted generator, then choose <strong>Gen/Cancel</strong>.</li><li>Review and approve the trust warning. Ruby has normal file, command and network access. This is <strong>not a sandbox</strong>.</li><li>Read the result in <strong>Preview</strong>. Errors also appear there; Code is unchanged.</li><li>Use <strong>Append</strong>, or confirm <strong>Replace</strong>, to change Code.</li><li>Press Run separately for sound. <strong>Undo gen</strong> restores the prior Code until you make later manual edits; pressing it again redoes the change.</li></ol>
+<p>Gen/Cancel cancels an active worker. Stop stops audio, not generation. Limits: one worker per instance, 5 seconds, 64 KiB script, 32,000 UTF-8 output bytes, and 16 KiB diagnostics. Empty output, failures, stale results and oversized additions cannot erase Code. Editing the script or restoring a project invalidates a running result.</p>
+<p>Generators run in a temporary working directory, separate from the audio runtime. Do not depend on the host’s working directory. Use explicit paths for any data you read. Double-quoted Ruby strings interpret <code>\n</code> as a newline; single-quoted strings preserve it literally.</p>
+</section>
+<section id="controls"><h2>5. Editor controls</h2>
+<table><thead><tr><th>Control</th><th>Purpose</th></tr></thead><tbody>
+<tr><td>Code / Script / Preview</td><td>Main Sonic Pi source, generator source, and read-only output.</td></tr>
+<tr><td>Open / Save</td><td>Load or save the active source buffer in its portable directory.</td></tr>
+<tr><td>Complete</td><td>Choose a Sonic Pi word or symbol to insert. Unlike Snips, ordinary completion can replace a selected token.</td></tr>
+<tr><td>Snippets</td><td>Browse Snips files, append without replacing source, undo the last append, open the folder or check report.</td></tr>
+<tr><td>Run Sel / Loops</td><td>Run selected source or a complete live_loop from Code without replacing the editor buffer.</td></tr>
+<tr><td>Docs</td><td>Show inline reference help for a selected Sonic Pi name, or choose a topic.</td></tr>
+<tr><td>Jump</td><td>Navigate to a mapped runtime error in Code. Errors from unrelated or ambiguous source may not have an editor location.</td></tr>
+<tr><td>Help</td><td>Open this local HTML guide in your browser; internet is not required.</td></tr>
+<tr><td>Run / Stop</td><td>Submit Code to Sonic Pi / stop its jobs. Script and Preview cannot be run as audio.</td></tr>
+</tbody></table>
+<p>Syntax colours help distinguish Ruby keywords, comments, strings, symbols, numbers and Sonic Pi names. The lower output area shows runtime or generator messages. Switching Code/Script/Preview reloads the text editor and resets its local typing undo history. Generator undo and Snips undo are separate protected actions.</p>
+</section>
+<section id="keys"><h2>6. Keyboard shortcuts</h2>
+<table><thead><tr><th>Shortcut</th><th>Action</th></tr></thead><tbody>
+<tr><td><kbd>Ctrl</kbd> + <kbd>Enter</kbd></td><td>Run Code, or generate when in Script. Preview is not executable.</td></tr>
+<tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Enter</kbd></td><td>Stop Sonic Pi audio jobs.</td></tr>
+<tr><td><kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>Enter</kbd></td><td>Run selected Code.</td></tr>
+<tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Space</kbd></td><td>Inline Sonic Pi documentation.</td></tr>
+</tbody></table>
+<p>Click inside the editor first. A host can intercept shortcuts before the plug-in receives them; use the on-screen buttons if that happens. Standard typing, selection, copy/paste and editor undo operate on the active editable view.</p>
+</section>
+<section id="trouble"><h2>7. Troubleshooting</h2>
+<details><summary>No sound</summary><p>Check the host audio engine and stereo output routing, wait for runtime readiness, use Code view and press Run. Confirm the program ends with <code>end</code>, not <code>en</code>. Look at the runtime messages and <code>RuntimeData/spider-runtime.log</code>. The instrument does not need host tempo synchronization.</p></details>
+<details><summary>Runtime will not start or files will not save</summary><p>Keep the complete self-contained bundle and move it to a writable directory. RuntimeData, Snips and Files live inside that folder. There is no hidden AppData fallback. A DAW may require a rescan after you move the plug-in. Missing bundled runtime files require reinstalling the complete package, not just its binary.</p></details>
+<details><summary>A snippet is not listed</summary><p>Put a regular UTF-8 .rb or .txt file directly in Snips, not a nested folder or symlink. Reopen the Snippets menu. More than 128 files produces an explicit limit error rather than hiding files.</p></details>
+<details><summary>A snippet no longer plays</summary><p>Check the exact tested source in the bundled report. A changed or newly added file is unverified. Look for runtime errors, duplicate loop names or unavailable external files. A snippet can be valid on its own but conflict with the program it is appended to. Stop and test unfamiliar code separately after saving your current work.</p></details>
+<details><summary>A generator fails or returns nothing</summary><p>Its final expression must be a String. Put Sonic Pi commands inside that String rather than calling them as generator Ruby. Review Preview for syntax errors, exceptions, timeouts and size limits. Empty output is deliberately prevented from replacing Code.</p></details>
+</section>
+</main>
+<footer>Dexter U.S. Sonic Pi is an independent open-source VST3 wrapper. Sonic Pi and third-party components retain their respective notices and licenses in the bundle. This guide uses no remote scripts, styles, fonts or assets.</footer>
+</body></html>

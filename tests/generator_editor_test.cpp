@@ -45,7 +45,22 @@ void test(GeneratorOptions options) {
     Controller controller;
     require(controller.initialize(&host) == kResultOk, "Controller init failed");
     const auto original = controller.currentCode();
+    require(!controller.appendSnippet(""), "An empty snip was appended");
+    require(controller.appendSnippet("# appended 音\nplay 64\n") &&
+            controller.currentCode().starts_with(original) &&
+            controller.currentCode().find("# appended 音") != std::string::npos,
+            "Snippet append replaced existing source");
+    require(controller.undoSnippetAppend() && controller.currentCode() == original,
+            "Snippet undo did not preserve the original source");
+    controller.appendSnippet("play 70\n");
+    controller.replaceActiveText("later manual edit\n");
+    require(!controller.undoSnippetAppend() &&
+            controller.currentCode() == "later manual edit\n",
+            "Snippet undo discarded later manual changes");
+    controller.replaceActiveText(original);
     require(controller.setEditorMode(EditorMode::generator), "Could not open Script");
+    require(!controller.appendSnippet("play 64"),
+            "Sonic Pi snippet was inserted into the Ruby generator");
     require(controller.replaceActiveText("\"play 75\\n\""), "Could not edit script");
     require(controller.currentCode() == original, "Script edit changed Sonic Pi code");
     require(!controller.sendCurrentCode() && !controller.sendSelectedCode(),
@@ -100,6 +115,9 @@ void test(GeneratorOptions options) {
             controller.currentCode() == "play 75\n", "Cancel modified code");
     controller.setEditorMode(EditorMode::code);
     controller.replaceActiveText(std::string(kMaxGeneratorOutputBytes, '#'));
+    require(!controller.appendSnippet("play 66\n") &&
+            controller.currentCode().size() == kMaxGeneratorOutputBytes,
+            "Oversized snippet damaged existing code");
     controller.setEditorMode(EditorMode::generator);
     controller.replaceActiveText("'play 81'");
     controller.startGenerator(options);

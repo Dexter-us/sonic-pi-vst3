@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <filesystem>
 #include <string>
 
 namespace SonicPiVst3 {
@@ -21,7 +22,10 @@ public:
     SonicPiLiveRuntime(const SonicPiLiveRuntime&) = delete;
     SonicPiLiveRuntime& operator=(const SonicPiLiveRuntime&) = delete;
 
-    bool start(ClockworkClient* client, double sampleRate) noexcept;
+    // dataRoot is for isolated executable probes. Instruments leave it empty
+    // and resolve RuntimeData from their actual portable bundle.
+    bool start(ClockworkClient* client, double sampleRate,
+               const std::filesystem::path& dataRoot = {}) noexcept;
     void stop() noexcept;
 
     bool runCode(const std::string& code) noexcept;

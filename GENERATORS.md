@@ -7,8 +7,10 @@ No extra language installation is needed in the self-contained Windows bundle.
 ## Workflow
 
 1. Choose **Script** in the editor's top row. A starter generator is provided.
-2. Edit it, or use **Open** to load a trusted `.rb` file. **Save** saves the
-   current Code or Script buffer, each with its own file destination.
+2. Edit it, or use **Open** to load a trusted `.rb` file from
+   `Files/Generators` inside the portable `.vst3` folder. **Save** saves Script
+   there; Code uses `Files/Code`. Copy external source into those directories
+   before opening it. Subdirectories are supported.
 3. Choose **Gen/Cancel** or press **Ctrl+Enter** while in Script.
 4. Review the trust warning and approve only scripts you trust.
 5. The **Preview** view displays the generated source, read-only. Errors are
@@ -76,6 +78,11 @@ Previews, running jobs, trust approval and external Save destinations are not
 restored. Use Save to choose a file destination again after restoring a project.
 
 ## Native regression checks
+
+The offline `Help/editor.html` guide is opened by the editor's Help button.
+Snippets are loaded from the portable `Snips` folder and append without
+replacing existing Code. Keep the entire `.vst3` folder writable and together
+when moving it; its user files and runtime data are included.
 
 The CMake targets `sonic_pi_generator_test`,
 `sonic_pi_generator_editor_test` and `sonic_pi_state_test` cover process limits,

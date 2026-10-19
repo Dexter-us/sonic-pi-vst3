@@ -17,6 +17,8 @@ Steinberg::tresult PLUGIN_API Controller::setState(Steinberg::IBStream* state) {
     generatorPreviewValid_ = false;
     generatorPreview_.clear();
     codeBeforeGenerator_.reset();
+    codeBeforeSnippet_.reset();
+    codeAfterSnippet_.clear();
     codeState_ = decoded.code;
     generatorSource_ = decoded.generator;
     restoredStateForUi_ = std::move(decoded);
@@ -178,6 +180,29 @@ bool Controller::undoGeneratorApply() {
     setEditorMode(EditorMode::code);
     setDirty(true);
     syncCodeState();
+    return true;
+}
+
+bool Controller::appendSnippet(std::string_view text) {
+    if (editorMode_ != EditorMode::code || text.empty()) return false;
+    auto next = codeState_;
+    if (!next.empty() && next.back() != '\n') next += '\n';
+    if (!next.empty()) next += '\n';
+    next += text;
+    if (next.size() > kMaxGeneratorOutputBytes) return false;
+    const auto previous = codeState_;
+    if (!replaceActiveText(next)) return false;
+    codeBeforeSnippet_ = previous;
+    codeAfterSnippet_ = codeState_;
+    return true;
+}
+
+bool Controller::undoSnippetAppend() {
+    if (!codeBeforeSnippet_ || codeState_ != codeAfterSnippet_) return false;
+    const auto previous = *codeBeforeSnippet_;
+    if (!replaceActiveText(previous)) return false;
+    codeBeforeSnippet_.reset();
+    codeAfterSnippet_.clear();
     return true;
 }
 

@@ -34,6 +34,7 @@
     <control-tag name="ReplaceGenerated" tag="1019"/>
     <control-tag name="UndoGenerated" tag="1020"/>
     <control-tag name="EditorMode" tag="1021"/>
+    <control-tag name="EditorHelp" tag="1022"/>
   </control-tags>
   <template background-color="Panel" class="CViewContainer" name="view"
             origin="0, 0" size="560, 420" minSize="560, 420" maxSize="560, 420"
@@ -45,7 +46,7 @@
           font="~ NormalFontBig"
           font-antialias="true" font-color="Text" frame-color="Border"
           frame-width="1" origin="18, 12" size="524, 42"
-            text-alignment="left" title="Dexter U.S. Sonic Pi v0.1.11 - Code: Untitled"
+            text-alignment="left" title="Dexter U.S. Sonic Pi v0.1.12 - Code: Untitled"
           transparent="false"/>
     <view back-color="Panel" class="CTextLabel" font="~ NormalFont"
           font-antialias="true" font-color="Muted" frame-color="Panel"
@@ -77,9 +78,9 @@
       <view class="CTextButton" control-tag="UndoGenerated" origin="398, 0" size="58, 24"
             font="~ NormalFontSmall" title="Undo gen" back-color="Border"
             font-color="Text" frame-color="Border"/>
-      <view class="CTextLabel" control-tag="EditorMode" origin="460, 2" size="52, 20"
-            font="~ NormalFontSmall" title="CODE" font-color="Muted"
-            back-color="Panel" frame-color="Panel" transparent="true"/>
+      <view class="CTextButton" control-tag="EditorHelp" origin="460, 0" size="52, 24"
+            font="~ NormalFontSmall" title="Help" font-color="Text"
+            back-color="Border" frame-color="Border"/>
       <view background-color="Editor" background-color-draw-style="filled"
               bordered="false" class="CScrollView" container-size="512, 130"
               horizontal-scrollbar="true" origin="0, 30" size="512, 130"

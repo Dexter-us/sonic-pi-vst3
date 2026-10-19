@@ -1,5 +1,13 @@
 # Dexter U.S. Sonic Pi VST3 live-coding instrument
 
+**v0.1.12:** Snippets loads `.rb` / `.txt` files from the portable `Snips` folder
+and appends without replacing selections. Source files use `Files/Code` or
+`Files/Generators`; runtime data and logs use `RuntimeData`. These directories
+and the offline `Help/editor.html` guide live inside the `.vst3` folder.
+The Windows packaging check executes every shipped snippet and creates
+`Help/snippet-checks.html` with the exact tested source and audio results.
+Keep the entire bundle in a writable location and back up user files before upgrades.
+
 **v0.1.11:** trusted Ruby code generators now have separate Script and read-only
 Preview views, explicit Append/Replace and generator-edit undo. Both source
 buffers are saved with the DAW project; generation never starts playback.

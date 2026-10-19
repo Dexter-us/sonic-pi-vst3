@@ -71,6 +71,8 @@ public:
     std::string selectedText() const;
     bool replaceCurrentCode(const std::string& code);
     bool insertTextAtCursor(std::string_view text);
+    bool appendSnippet(std::string_view text);
+    bool undoSnippetAppend();
     bool sendCurrentCode();
     bool sendSelectedCode();
     bool goToRuntimeError();
@@ -109,6 +111,8 @@ private:
     std::string bufferWarning_;
     std::optional<std::string> codeBeforeGenerator_;
     std::string codeAfterGenerator_;
+    std::optional<std::string> codeBeforeSnippet_;
+    std::string codeAfterSnippet_;
     std::optional<EditorState> restoredStateForUi_;
     EditorMode editorMode_ = EditorMode::code;
     RubyGenerator generator_;

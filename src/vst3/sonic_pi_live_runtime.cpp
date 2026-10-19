@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "socket_platform.h"
 #include "sonic_pi_live_runtime.h"
+#include "sonic_pi_portable.h"
 
 #include "clockwork_tcp_osc_bridge.h"
 
@@ -123,19 +124,6 @@ std::vector<std::string> childEnvironment(const std::string& root,
     return environment;
 }
 #else
-std::filesystem::path localDataDirectory() {
-    const DWORD required = GetEnvironmentVariableW(L"LOCALAPPDATA", nullptr, 0);
-    if (required > 1) {
-        std::vector<wchar_t> value(required);
-        const DWORD length =
-            GetEnvironmentVariableW(L"LOCALAPPDATA", value.data(), required);
-        if (length > 0 && length < required) {
-            return std::filesystem::path(value.data());
-        }
-    }
-    return std::filesystem::temp_directory_path();
-}
-
 std::wstring quoteWindowsArgument(const std::wstring& argument) {
     std::wstring quoted = L"\"";
     std::size_t backslashes = 0;
@@ -386,7 +374,8 @@ struct SonicPiLiveRuntime::Impl {
     pid_t workerPid = -1;
 #endif
 
-    bool start(ClockworkClient* client, double engineSampleRate) noexcept {
+    bool start(ClockworkClient* client, double engineSampleRate,
+               const std::filesystem::path& dataRoot) noexcept {
         if (isReady.load() || monitorRunning.load()) return true;
         startupFailed.store(false);
         setError({});
@@ -399,14 +388,24 @@ struct SonicPiLiveRuntime::Impl {
             setError("Could not initialize Windows socket support");
             return false;
         }
-        userHome = localDataDirectory() / L"sonic-pi-vst";
-#else
-        const char* homeEnv = std::getenv("HOME");
-        const auto base = homeEnv && *homeEnv
-            ? std::filesystem::path(homeEnv)
-            : std::filesystem::temp_directory_path();
-        userHome = base / ".sonic-pi-vst";
 #endif
+        try {
+            auto paths = portablePaths();
+#if defined(_WIN32)
+            if (!runtimeBundleRoot.empty()) {
+                paths = portablePathsFromModule(runtimeBundleRoot);
+            }
+#endif
+            if (!dataRoot.empty()) paths = PortablePaths{dataRoot};
+            std::string error;
+            if (!ensurePortableDirectories(paths, error)) {
+                setError(error); return false;
+            }
+            userHome = paths.runtime();
+        } catch (const std::exception& e) {
+            setError(std::string("Cannot locate portable runtime data: ") + e.what());
+            return false;
+        }
         {
             std::lock_guard<std::mutex> lock(logPathMutex);
             logPath = userHome / "spider-runtime.log";
@@ -732,8 +731,9 @@ SonicPiLiveRuntime::~SonicPiLiveRuntime() {
 }
 
 bool SonicPiLiveRuntime::start(ClockworkClient* client,
-                               double sampleRate) noexcept {
-    return impl_->start(client, sampleRate);
+                               double sampleRate,
+                               const std::filesystem::path& dataRoot) noexcept {
+    return impl_->start(client, sampleRate, dataRoot);
 }
 
 void SonicPiLiveRuntime::stop() noexcept {

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "sonic_pi_controller.h"
 #include "sonic_pi_editor_help.h"
+#include "sonic_pi_portable.h"
 #include "plugin_ids.h"
 
 #include "pluginterfaces/vst/ivstmessage.h"
@@ -61,6 +62,7 @@ constexpr Steinberg::int32 kAppendGeneratedTag = 1018;
 constexpr Steinberg::int32 kReplaceGeneratedTag = 1019;
 constexpr Steinberg::int32 kUndoGeneratedTag = 1020;
 constexpr Steinberg::int32 kEditorModeTag = 1021;
+constexpr Steinberg::int32 kEditorHelpTag = 1022;
 
 const char* statusText(RuntimeStatus status) {
     switch (status) {
@@ -112,10 +114,11 @@ bool readCodeFile(const std::string& utf8Path, std::string& code) {
     std::ifstream input(pathFromUtf8(utf8Path), std::ios::binary);
     if (!input) return false;
 
-    code.assign(std::istreambuf_iterator<char>(input),
-                std::istreambuf_iterator<char>());
-    if (input.bad() || code.size() > 16 * 1024 * 1024 ||
-        code.find('\0') != std::string::npos) {
+    code.resize(kMaxCodeStateBytes + 1);
+    input.read(code.data(), static_cast<std::streamsize>(code.size()));
+    code.resize(static_cast<std::size_t>(input.gcount()));
+    if (input.bad() || code.size() > kMaxCodeStateBytes ||
+        !isUtf8Source(code)) {
         code.clear();
         return false;
     }
@@ -130,15 +133,6 @@ bool readCodeFile(const std::string& utf8Path, std::string& code) {
     }
     code = normalizeLineEndings(std::move(code));
     return true;
-}
-
-bool writeCodeFile(const std::string& utf8Path, const std::string& code) {
-    std::ofstream output(pathFromUtf8(utf8Path),
-                         std::ios::binary | std::ios::trunc);
-    if (!output) return false;
-    output.write(code.data(), static_cast<std::streamsize>(code.size()));
-    output.flush();
-    return output.good();
 }
 
 struct LiveLoopBlock {
@@ -424,7 +418,8 @@ std::string_view sourceLineAt(std::string_view source, std::size_t lineNumber) {
     return result;
 }
 
-std::string chooseCodeFile(VSTGUI::CControl* control, bool save) {
+std::string chooseCodeFile(VSTGUI::CControl* control, bool save,
+                           const std::filesystem::path& directory, bool generator) {
     auto* selector = VSTGUI::CNewFileSelector::create(
         control ? control->getFrame() : nullptr,
         save ? VSTGUI::CNewFileSelector::kSelectSaveFile
@@ -433,7 +428,11 @@ std::string chooseCodeFile(VSTGUI::CControl* control, bool save) {
 
     const VSTGUI::CFileExtension rubySource(
         "Sonic Pi code (*.rb)", "rb", "text/x-ruby");
-    selector->setTitle(save ? "Save Sonic Pi code" : "Open Sonic Pi code");
+    selector->setTitle(generator
+        ? (save ? "Save Ruby generator" : "Open Ruby generator")
+        : (save ? "Save Sonic Pi code" : "Open Sonic Pi code"));
+    const auto initialDirectory = pathUtf8(directory);
+    selector->setInitialDirectory(initialDirectory.c_str());
     selector->addFileExtension(rubySource);
     selector->addFileExtension(
         VSTGUI::CFileExtension("Text files (*.txt)", "txt", "text/plain"));
@@ -522,15 +521,6 @@ constexpr EditorChoice kCompletionChoices[] = {
     {":drum_cymbal_closed - sample", ":drum_cymbal_closed"},
     {":loop_amen - sample", ":loop_amen"},
     {":ambi_lunar_land - sample", ":ambi_lunar_land"},
-};
-
-constexpr EditorChoice kSnippetChoices[] = {
-    {"Live loop", "live_loop :pulse do\n  play 60, amp: 0.5\n  sleep 1\nend\n"},
-    {"Synth and note", "use_synth :prophet\nplay 60, amp: 0.5\n"},
-    {"Effect block", "with_fx :reverb do\n  play 60\nend\n"},
-    {"Sample beat", "sample :bd_haus\nsleep 1\n"},
-    {"Timed note pattern", "play_pattern_timed [60, 64, 67], 0.25\n"},
-    {"Thread", "in_thread do\n  play 60\n  sleep 1\nend\n"},
 };
 
 template <std::size_t N>
@@ -691,7 +681,13 @@ public:
         // controlEndEdit, so dispatch actions while the clicked value is high.
         if (!control || control->getValueNormalized() <= 0.5f) return;
 
-        if (control->getTag() == kCodeViewTag) {
+        if (control->getTag() == kEditorHelpTag) {
+            try {
+                if (!openPortablePath(portablePaths().help() / "editor.html")) {
+                    showNotice("Cannot open Help/editor.html; keep the full portable bundle.");
+                }
+            } catch (const std::exception& e) { showNotice(e.what()); }
+        } else if (control->getTag() == kCodeViewTag) {
             switchEditor(EditorMode::code);
         } else if (control->getTag() == kGeneratorViewTag) {
             switchEditor(EditorMode::generator);
@@ -719,7 +715,7 @@ public:
             showInsertMenu(control, kCompletionChoices,
                            "Inserted completion");
         } else if (control->getTag() == kSnippetsTag) {
-            showInsertMenu(control, kSnippetChoices, "Inserted snippet");
+            showSnipsMenu(control);
         } else if (control->getTag() == kRunSelectionTag) {
             if (owner_->editorMode() != EditorMode::code) {
                 showNotice("Switch to Code before running a selection.");
@@ -900,6 +896,65 @@ public:
     }
 
 private:
+    void showSnipsMenu(VSTGUI::CView* anchor) {
+        if (!anchor || !anchor->getFrame()) return;
+        try {
+            const auto paths = portablePaths();
+            std::string error;
+            if (!ensurePortableDirectories(paths, error)) {
+                showNotice(error);
+                return;
+            }
+            const auto files = listSnips(paths);
+            auto menu = VSTGUI::makeOwned<VSTGUI::COptionMenu>();
+            menu->setStyle(VSTGUI::COptionMenu::kPopupStyle);
+            menu->addEntry("Open portable Snips folder");
+            menu->addEntry("Undo last snip append");
+            menu->addEntry("Open bundled snippet check report");
+            for (const auto& file : files) {
+                auto title = "Append: " + pathUtf8(file.filename());
+                std::replace(title.begin(), title.end(), '\n', ' ');
+                std::replace(title.begin(), title.end(), '\r', ' ');
+                menu->addEntry(title.c_str());
+            }
+            if (files.empty()) showNotice("No snips: add .rb or .txt files to the Snips folder.");
+            VSTGUI::CPoint location(0, anchor->getViewSize().getHeight());
+            anchor->localToFrame(location);
+            menu->popup(anchor->getFrame(), location,
+                [this, paths, files](VSTGUI::COptionMenu* selected) {
+                    if (!selected) return;
+                    const auto index = selected->getLastResult();
+                    if (index == 0) {
+                        if (!openPortablePath(paths.snips())) {
+                            showNotice("Could not open the Snips folder.");
+                        }
+                    } else if (index == 1) {
+                        showNotice(owner_->undoSnippetAppend()
+                            ? "Last snip append undone."
+                            : "No unchanged snip append to undo; later edits are protected.");
+                    } else if (index == 2) {
+                        if (!openPortablePath(paths.help() / "snippet-checks.html")) {
+                            showNotice("Snippet check report is missing from this package.");
+                        }
+                    } else if (index >= 3 &&
+                               static_cast<std::size_t>(index - 3) < files.size()) {
+                        if (owner_->editorMode() != EditorMode::code) {
+                            showNotice("Switch to Code before appending a Sonic Pi snip.");
+                            return;
+                        }
+                        std::string source;
+                        if (!readCodeFile(pathUtf8(files[index - 3]), source)) {
+                            showNotice("Could not read that snip as source text.");
+                        } else {
+                            showNotice(owner_->appendSnippet(source)
+                                ? "Snip appended; existing code kept. Press Run when ready."
+                                : "Snip is empty or combined code exceeds 32000 bytes.");
+                        }
+                    }
+                });
+        } catch (const std::exception& e) { showNotice(e.what()); }
+    }
+
     void switchEditor(EditorMode mode) {
         if (!owner_->setEditorMode(mode)) {
             showNotice("Could not switch editor buffers");
@@ -1231,10 +1286,18 @@ private:
         auto& activePath = script ? generatorFilePath_ : currentFilePath_;
         auto& saved = script ? savedGenerator_ : savedCode_;
         std::string path = activePath;
-        if (path.empty()) path = chooseCodeFile(control, true);
+        PortablePaths paths;
+        std::string fileError;
+        try { paths = portablePaths(); }
+        catch (const std::exception& e) { showNotice(e.what()); return false; }
+        if (!ensurePortableDirectories(paths, fileError)) {
+            showNotice(fileError); return false;
+        }
+        const auto directory = script ? paths.generators() : paths.code();
+        if (path.empty()) path = chooseCodeFile(control, true, directory, script);
         if (path.empty()) return false;
-        if (!writeCodeFile(path, code)) {
-            showNotice("Could not save code file");
+        if (!savePortableSource(pathFromUtf8(path), directory, code, fileError)) {
+            showNotice("Save failed: " + fileError);
             return false;
         }
 
@@ -1252,8 +1315,21 @@ private:
             return;
         }
         const bool script = owner_->editorMode() == EditorMode::generator;
-        const auto path = chooseCodeFile(control, false);
+        PortablePaths paths;
+        std::string fileError;
+        try { paths = portablePaths(); }
+        catch (const std::exception& e) { showNotice(e.what()); return; }
+        if (!ensurePortableDirectories(paths, fileError)) {
+            showNotice(fileError); return;
+        }
+        const auto directory = script ? paths.generators() : paths.code();
+        const auto path = chooseCodeFile(control, false, directory, script);
         if (path.empty()) return;
+        if (!pathIsInside(pathFromUtf8(path), directory)) {
+            showNotice(script ? "Copy that file into Files/Generators first."
+                              : "Copy that file into Files/Code first.");
+            return;
+        }
 
         if (hasUnsavedChanges()) {
 #if defined(_WIN32)

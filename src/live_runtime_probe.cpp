@@ -2,6 +2,7 @@
 // Exercise the same Ruby runtime and in-process engine used by the VST.
 #include "clockwork_embed.h"
 #include "sonic_pi_live_runtime.h"
+#include "sonic_pi_portable.h"
 
 #include <algorithm>
 #include <array>
@@ -12,6 +13,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <sstream>
+#include <random>
 #include <iterator>
 #include <stdexcept>
 #include <string>
@@ -96,47 +99,150 @@ void render(ClockworkEmbed* engine, StereoBuffers& buffers) {
     }
 }
 
-std::filesystem::path runtimeLogPath() {
+void printRuntimeLogTail(const SonicPiVst3::SonicPiLiveRuntime& runtime) {
+    std::cerr << "--- Sonic Pi runtime log ---\n" << runtime.logTail(16000)
+              << "\n--- end runtime log ---\n";
+}
+
+std::string htmlEscape(std::string_view text) {
+    std::string escaped;
+    for (char c : text) {
+        switch (c) {
+        case '&': escaped += "&amp;"; break;
+        case '<': escaped += "&lt;"; break;
+        case '>': escaped += "&gt;"; break;
+        case '"': escaped += "&quot;"; break;
+        default: escaped += c;
+        }
+    }
+    return escaped;
+}
+
+bool checkSnips(ClockworkEmbed* engine, SonicPiVst3::SonicPiLiveRuntime& runtime,
+                StereoBuffers& buffers, AudioBlockPacer& pacer,
+                const std::filesystem::path& directory,
+                const std::filesystem::path& report) {
+    const auto files = SonicPiVst3::listSnipsDirectory(directory);
+    if (files.empty()) throw std::runtime_error("No snippets found to validate");
+    std::ostringstream html;
+    html << "<!doctype html><html lang=\"en\"><meta charset=\"utf-8\">"
+         << "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+         << "<title>Sonic Pi snippet checks</title><style>"
+         << "body{font:16px/1.6 system-ui;max-width:900px;margin:40px auto;padding:20px}"
+         << "pre{background:#f1f3f5;padding:18px;white-space:pre-wrap}"
+         << "article{border-top:1px solid #bbb;margin-top:30px}.pass{color:#176235}"
+         << ".fail{color:#a41414}</style><h1>Bundled snippet checks</h1>"
+         << "<p>Plug-in " << SONIC_PI_PLUGIN_VERSION
+         << "; Sonic Pi v5.0.0; 48000 Hz stereo host buffers. "
 #if defined(_WIN32)
-    const char* base = std::getenv("LOCALAPPDATA");
-    if (base && *base) {
-        return std::filesystem::path(base) / "sonic-pi-vst" /
-               "spider-runtime.log";
-    }
+         << "Windows"
 #else
-    const char* base = std::getenv("HOME");
-    if (base && *base) {
-        return std::filesystem::path(base) / ".sonic-pi-vst" /
-               "spider-runtime.log";
-    }
+         << "Linux"
 #endif
-    return {};
+         << " live-runtime execution, not just Ruby syntax checking.</p>"
+         << "<p>This report covers the exact source below. Changed or newly added "
+         << "snippets are unverified. Appending into another program can introduce "
+         << "loop-name or other conflicts.</p>";
+    bool allPassed = true;
+    for (const auto& file : files) {
+        if (std::filesystem::file_size(file) > 32000) {
+            throw std::runtime_error("Snippet exceeds Run limit: " + file.string());
+        }
+        std::ifstream input(file, std::ios::binary);
+        if (!input) throw std::runtime_error("Cannot read snippet: " + file.string());
+        std::string source((std::istreambuf_iterator<char>(input)), {});
+        runtime.stopAllJobs();
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+        while (std::chrono::steady_clock::now() < deadline) {
+            render(engine, buffers); pacer.wait();
+        }
+        const auto before = runtime.logTail(64000);
+        const bool sent = !source.empty() && runtime.runCode(source);
+        float peak = 0;
+        double energy = 0;
+        std::uint64_t samples = 0;
+        deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(2400);
+        while (std::chrono::steady_clock::now() < deadline) {
+            render(engine, buffers);
+            for (std::size_t i = 0; i < kCallbackFrames; ++i) {
+                for (float sample : {buffers.left[i], buffers.right[i]}) {
+                    peak = std::max(peak, std::abs(sample));
+                    energy += static_cast<double>(sample) * sample;
+                    ++samples;
+                }
+            }
+            pacer.wait();
+        }
+        const auto after = runtime.logTail(64000);
+        const auto delta = after.starts_with(before) ? after.substr(before.size()) : after;
+        // Spider also logs transport exceptions when no standalone GUI listens.
+        // Only its structured job-error events describe submitted Ruby source.
+        const bool error = delta.find("[ruby-error] ") != std::string::npos;
+        const auto rms = samples ? std::sqrt(energy / samples) : 0;
+        const bool passed = sent && !error && peak > 1e-5f && rms > 1e-6;
+        allPassed &= passed;
+        const auto name = SonicPiVst3::pathUtf8(file.filename());
+        std::cout << (passed ? "PASS" : "FAIL") << ": " << name
+                  << "; peak " << peak << "; RMS " << rms << '\n';
+        html << "<article><h2>" << htmlEscape(name) << "</h2><p class=\""
+             << (passed ? "pass" : "fail") << "\"><strong>"
+             << (passed ? "PASS" : "FAIL") << "</strong> · peak " << peak
+             << " · RMS " << rms << "</p><pre>" << htmlEscape(source) << "</pre>";
+        if (error || !passed) html << "<h3>Runtime output</h3><pre>"
+                                  << htmlEscape(delta) << "</pre>";
+        html << "</article>";
+    }
+    runtime.stopAllJobs();
+    // Prove errors are observable; non-silent audio alone must never pass a
+    // snippet that plays a note and then raises an exception.
+    const auto beforeControl = runtime.logTail(64000);
+    runtime.runCode("raise 'SNIPS_CHECK_EXPECTED_ERROR'");
+    const auto controlDeadline = std::chrono::steady_clock::now() +
+                                 std::chrono::milliseconds(1500);
+    while (std::chrono::steady_clock::now() < controlDeadline) {
+        render(engine, buffers); pacer.wait();
+    }
+    const auto controlLog = runtime.logTail(64000);
+    const auto controlDelta = controlLog.starts_with(beforeControl)
+        ? controlLog.substr(beforeControl.size()) : controlLog;
+    const bool controlPassed =
+        controlDelta.find("[ruby-error] Exception") != std::string::npos &&
+        controlDelta.find("SNIPS_CHECK_EXPECTED_ERROR") != std::string::npos;
+    allPassed &= controlPassed;
+    std::cout << (controlPassed ? "PASS" : "FAIL")
+              << ": negative control detected an intentional Ruby exception\n";
+    html << "<h2>Error-detection control</h2><p>"
+         << (controlPassed
+                ? "PASS: a deliberate failing program produced a structured Ruby error."
+                : "FAIL: the deliberate Ruby error was not observed; results are not reliable.")
+         << "</p>";
+    runtime.stopAllJobs();
+    html << "<p><strong>" << (allPassed ? "All snippets passed." : "Checks failed.")
+         << "</strong> " << files.size() << " snippets executed.</p></html>";
+    std::filesystem::create_directories(report.parent_path());
+    std::ofstream output(report, std::ios::binary);
+    output << html.str();
+    output.close();
+    if (!output) throw std::runtime_error("Cannot write snippet validation report");
+    return allPassed;
 }
 
-void printRuntimeLogTail() {
-    const auto path = runtimeLogPath();
-    if (path.empty()) return;
-
-    std::ifstream input(path, std::ios::binary);
-    if (!input) {
-        std::cerr << "Could not read Sonic Pi runtime log: "
-                  << path.string() << '\n';
-        return;
+struct ProbeData {
+    std::filesystem::path path = std::filesystem::temp_directory_path() /
+        ("sonic-pi-probe-" + std::to_string(std::random_device{}()));
+    ~ProbeData() {
+        std::error_code ignored;
+        std::filesystem::remove_all(path, ignored);
     }
-
-    std::string contents((std::istreambuf_iterator<char>(input)),
-                         std::istreambuf_iterator<char>());
-    constexpr std::size_t kMaxLogBytes = 16000;
-    if (contents.size() > kMaxLogBytes) {
-        contents.erase(0, contents.size() - kMaxLogBytes);
-    }
-    std::cerr << "--- Sonic Pi runtime log: " << path.string() << " ---\n"
-              << contents << "\n--- end runtime log ---\n";
-}
+};
 
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc != 1 && (argc != 4 || std::string_view(argv[1]) != "--snips")) {
+        std::cerr << "Usage: sonic_pi_live_probe [--snips Snips-directory report.html]\n";
+        return 2;
+    }
     ClockworkEmbedConfig config{};
     config.struct_bytes = sizeof(config);
     config.sample_rate = kSampleRate;
@@ -154,10 +260,11 @@ int main() {
         return 1;
     }
 
+    ProbeData probeData;
     SonicPiVst3::SonicPiLiveRuntime runtime;
     try {
         auto* client = clockwork_embed_client(engine);
-        if (!client || !runtime.start(client, kSampleRate)) {
+        if (!client || !runtime.start(client, kSampleRate, probeData.path)) {
             throw std::runtime_error(
                 runtime.error().empty() ? "Could not start Sonic Pi runtime"
                                          : runtime.error());
@@ -207,6 +314,12 @@ int main() {
                 "Sonic Pi code ran but the host-owned audio buffers stayed silent");
         }
 
+        if (argc == 4 && !checkSnips(
+                engine, runtime, buffers, pacer,
+                std::filesystem::path(reinterpret_cast<const char8_t*>(argv[2])),
+                std::filesystem::path(reinterpret_cast<const char8_t*>(argv[3])))) {
+            throw std::runtime_error("One or more bundled snippets failed live-runtime checks");
+        }
         runtime.stop();
         clockwork_embed_close(engine);
         std::cout << "Sonic Pi Ruby code rendered through host-owned buffers.\n"
@@ -218,7 +331,7 @@ int main() {
         runtime.stop();
         clockwork_embed_close(engine);
         std::cerr << "Live runtime probe failed: " << error.what() << '\n';
-        printRuntimeLogTail();
+        printRuntimeLogTail(runtime);
         return 1;
     }
 }
